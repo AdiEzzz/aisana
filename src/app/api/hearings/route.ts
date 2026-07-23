@@ -1,0 +1,48 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { UserRole } from '@prisma/client'
+import { prisma } from '@/lib/prisma'
+import { requireApiRole } from '@/lib/auth'
+import { audit } from '@/lib/audit'
+
+export async function POST(request: NextRequest) {
+  try {
+    const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR])
+    if (response) return response
+
+    const data = await request.json()
+
+    if (!data.projectId || !data.date) {
+      return NextResponse.json({ error: 'Проект и дата обязательны' }, { status: 400 })
+    }
+
+    const hearing = await prisma.hearing.create({
+      data: {
+        projectId: data.projectId,
+        date: new Date(data.date),
+        commission: data.commission || [],
+        remarks: data.remarks || null,
+        recommendations: data.recommendations || null,
+        decision: data.decision || 'PENDING',
+        decisionText: data.decisionText || null,
+      },
+    })
+
+    await audit(user, 'CREATE', 'hearing', hearing.id)
+    return NextResponse.json(hearing, { status: 201 })
+  } catch (error: any) {
+    console.error('Create hearing error:', error)
+    return NextResponse.json({ error: 'Ошибка создания' }, { status: 500 })
+  }
+}
+
+export async function GET() {
+  try {
+    const hearings = await prisma.hearing.findMany({
+      include: { project: { include: { university: true } } },
+      orderBy: { date: 'desc' },
+    })
+    return NextResponse.json(hearings)
+  } catch {
+    return NextResponse.json({ error: 'Ошибка загрузки' }, { status: 500 })
+  }
+}

@@ -1,0 +1,255 @@
+'use client'
+
+import Link from 'next/link'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
+import { Eye, Sparkles, CheckCircle2, XCircle } from 'lucide-react'
+import { ProjectStatus, ProjectCategory } from '@prisma/client'
+import { useLang } from '@/context/LangContext'
+
+const STATUS_ORDER: ProjectStatus[] = ['IDEA', 'PROTOTYPE', 'PILOT', 'IMPLEMENTED', 'SCALED']
+const STATUS_COLORS: Record<ProjectStatus, string> = {
+  IDEA: '#94a3b8', PROTOTYPE: '#f59e0b', PILOT: '#3b82f6',
+  IMPLEMENTED: '#10b981', SCALED: '#8b5cf6',
+}
+const CATEGORY_COLORS: Record<ProjectCategory, string> = {
+  EDUCATION: '#3b82f6', SCIENCE: '#8b5cf6', MANAGEMENT: '#f59e0b',
+  ANALYTICS: '#10b981', GENERATIVE_AI: '#ec4899', COMPUTER_VISION: '#14b8a6', ROBOTICS: '#f97316',
+}
+
+interface Props {
+  universityKpi: {
+    target: number
+    met: number
+    notMet: number
+    failing: { name: string; shortName: string; count: number; missing: number }[]
+  }
+  byRegion: { name: string; nameKz: string | null; count: number }[]
+  byStatus: { status: string; count: number }[]
+  byCategory: { category: string; count: number }[]
+  technologies: { name: string; count: number }[]
+  topViewed: { id: string; title: string; viewCount: number }[]
+  topSearched: { id: string; title: string; searchHitCount: number }[]
+  topUniversities: { name: string; shortName: string; count: number }[]
+}
+
+function ChartCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6">
+      <h2 className="font-semibold text-slate-700">{title}</h2>
+      {hint && <p className="text-xs text-slate-400 mt-0.5 mb-4">{hint}</p>}
+      {!hint && <div className="mb-4" />}
+      {children}
+    </div>
+  )
+}
+
+function TopProjectsList({ items, valueKey, icon: Icon, emptyText }: {
+  items: { id: string; title: string; [k: string]: any }[]
+  valueKey: string
+  icon: any
+  emptyText: string
+}) {
+  const max = items[0]?.[valueKey] || 1
+  if (items.length === 0) return <p className="text-slate-400 text-sm py-4">{emptyText}</p>
+  return (
+    <div className="space-y-2.5">
+      {items.map(p => (
+        <Link key={p.id} href={`/projects/${p.id}`} className="block group">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className="text-xs text-slate-700 truncate group-hover:text-blue-600 transition-colors">{p.title}</span>
+            <span className="text-xs font-semibold text-slate-500 shrink-0 flex items-center gap-1">
+              <Icon size={12} className="text-slate-400" />{p[valueKey]}
+            </span>
+          </div>
+          <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full bg-slate-300 group-hover:bg-blue-400 rounded-full transition-colors"
+              style={{ width: `${(p[valueKey] / max) * 100}%` }} />
+          </div>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
+export function DashboardCharts({
+  universityKpi, byRegion, byStatus, byCategory,
+  technologies, topViewed, topSearched, topUniversities,
+}: Props) {
+  const { t } = useLang()
+
+  const statusMap = Object.fromEntries(byStatus.map(s => [s.status, s.count]))
+  const totalProjects = byStatus.reduce((s, x) => s + x.count, 0)
+  const funnel = STATUS_ORDER.map(status => ({
+    status,
+    name: t('projects', status),
+    count: statusMap[status] || 0,
+    color: STATUS_COLORS[status],
+  }))
+  const funnelMax = Math.max(...funnel.map(f => f.count), 1)
+
+  const categoryData = byCategory.map(c => ({
+    name: t('projects', c.category),
+    value: c.count,
+    color: CATEGORY_COLORS[c.category as ProjectCategory] || '#94a3b8',
+  }))
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* KPI вузов */}
+      <ChartCard title={t('dashboard', 'uniKpi')} hint={t('dashboard', 'uniKpiHint')}>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+            <div className="text-emerald-600 mb-2"><CheckCircle2 size={20} /></div>
+            <div className="text-2xl font-bold text-slate-800 tabular-nums">{universityKpi.met}</div>
+            <div className="text-xs text-slate-500 mt-0.5 font-medium">{t('dashboard', 'kpiMet')}</div>
+          </div>
+          <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+            <div className="text-red-600 mb-2"><XCircle size={20} /></div>
+            <div className="text-2xl font-bold text-slate-800 tabular-nums">{universityKpi.notMet}</div>
+            <div className="text-xs text-slate-500 mt-0.5 font-medium">{t('dashboard', 'kpiNotMet')}</div>
+          </div>
+        </div>
+        {universityKpi.failing.length === 0 ? (
+          <p className="text-emerald-600 text-sm py-4 flex items-center gap-1.5">
+            <CheckCircle2 size={15} />{t('dashboard', 'kpiAllMet')}
+          </p>
+        ) : (
+          <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
+            {universityKpi.failing.map(uni => (
+              <div key={uni.name}>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-xs text-slate-700 truncate">{uni.shortName}</span>
+                  <span className="text-xs shrink-0">
+                    <span className="font-semibold text-slate-600">{uni.count}</span>
+                    <span className="text-red-600 font-medium ml-1.5">
+                      ({t('dashboard', 'kpiMissing')} {uni.missing})
+                    </span>
+                  </span>
+                </div>
+                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-red-400 rounded-full transition-all"
+                    style={{ width: `${(uni.count / universityKpi.target) * 100}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </ChartCard>
+
+      {/* Воронка зрелости (вместо пирога по статусам) */}
+      <ChartCard title={t('dashboard', 'funnel')} hint={t('dashboard', 'funnelHint')}>
+        <div className="space-y-3 pt-2">
+          {funnel.map(f => (
+            <div key={f.status} className="flex items-center gap-3">
+              <span className="text-xs text-slate-500 w-28 shrink-0 text-right">{f.name}</span>
+              <div className="flex-1 h-7 bg-slate-50 rounded-md overflow-hidden">
+                <div
+                  className="h-full rounded-md flex items-center px-2.5 min-w-fit transition-all"
+                  style={{ width: `${(f.count / funnelMax) * 100}%`, backgroundColor: f.color }}
+                >
+                  <span className="text-[11px] font-semibold text-white whitespace-nowrap">
+                    {f.count}
+                    {totalProjects > 0 && f.count > 0 && (
+                      <span className="opacity-75 ml-1">· {Math.round((f.count / totalProjects) * 100)}%</span>
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </ChartCard>
+
+      {/* Проекты по регионам */}
+      <ChartCard title={t('dashboard', 'byRegion')}>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={byRegion} layout="vertical" margin={{ left: 0, right: 20 }}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+            <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11 }}
+              tickFormatter={v => v.length > 20 ? v.slice(0, 20) + '…' : v} />
+            <Tooltip />
+            <Bar dataKey="count" fill="#1A56DB" radius={[0, 4, 4, 0]} name={t('dashboard', 'projects')} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      {/* Популярные технологии */}
+      <ChartCard title={t('dashboard', 'technologies')}>
+        {technologies.length === 0 ? (
+          <p className="text-slate-400 text-sm text-center py-8">{t('dashboard', 'noData')}</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={technologies} layout="vertical" margin={{ left: 0, right: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+              <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }}
+                tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v} />
+              <Tooltip />
+              <Bar dataKey="count" fill="#0d9488" radius={[0, 4, 4, 0]} name={t('dashboard', 'projects')} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
+
+      {/* Проекты по категориям */}
+      <ChartCard title={t('dashboard', 'byCategory')}>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={categoryData} margin={{ bottom: 60 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
+            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+            <Tooltip />
+            <Bar dataKey="value" name={t('dashboard', 'projects')} radius={[4, 4, 0, 0]}>
+              {categoryData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      {/* Топ вузов */}
+      <ChartCard title={t('dashboard', 'topUni')}>
+        <div className="space-y-3">
+          {topUniversities.slice(0, 8).map((uni, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="text-sm font-bold text-slate-400 w-5 text-right shrink-0">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-xs text-slate-700 truncate">{uni.shortName}</span>
+                  <span className="text-xs font-semibold text-slate-600 shrink-0">{uni.count}</span>
+                </div>
+                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full transition-all"
+                    style={{ width: `${(uni.count / (topUniversities[0]?.count || 1)) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          ))}
+          {topUniversities.length === 0 && (
+            <p className="text-slate-400 text-sm text-center py-8">{t('dashboard', 'noData')}</p>
+          )}
+        </div>
+      </ChartCard>
+
+      {/* Интерес аудитории */}
+      <ChartCard title={t('dashboard', 'audience')}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div>
+            <p className="text-xs font-medium text-slate-400 mb-3 flex items-center gap-1.5">
+              <Eye size={13} />{t('dashboard', 'topViewed')}
+            </p>
+            <TopProjectsList items={topViewed} valueKey="viewCount" icon={Eye} emptyText={t('dashboard', 'noData')} />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-400 mb-3 flex items-center gap-1.5">
+              <Sparkles size={13} />{t('dashboard', 'topSearched')}
+            </p>
+            <TopProjectsList items={topSearched} valueKey="searchHitCount" icon={Sparkles} emptyText={t('dashboard', 'noData')} />
+          </div>
+        </div>
+      </ChartCard>
+    </div>
+  )
+}

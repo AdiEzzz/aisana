@@ -1,0 +1,110 @@
+'use client'
+
+import { useState } from 'react'
+import Link from 'next/link'
+import { Map, FolderKanban, Star, LayoutDashboard, Settings, Building2, Sparkles, Menu, X } from 'lucide-react'
+import { LangSwitcher } from '@/components/ui/LangSwitcher'
+import { useLang } from '@/context/LangContext'
+
+export function Navbar() {
+  const { t } = useLang()
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const navLinks = [
+    { href: '/',               label: t('nav', 'map'),          icon: Map          },
+    { href: '/dashboard',      label: t('nav', 'dashboard'),    icon: LayoutDashboard },
+    { href: '/universities',   label: t('nav', 'universities'), icon: Building2    },
+    { href: '/projects',       label: t('nav', 'projects'),     icon: FolderKanban },
+    { href: '/best-practices', label: t('nav', 'bestProjects'), icon: Star         },
+  ]
+
+  return (
+    <header className="gov-header border-b border-white/10 z-30 relative">
+      <div className="flex items-center h-14 px-4 gap-4">
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-3 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center border border-white/20">
+            <span className="text-[#F5A623] font-bold text-sm">ЖИ</span>
+          </div>
+          <div className="hidden md:block">
+            <p className="text-white font-semibold text-sm leading-tight">AiSana</p>
+            <p className="text-white/50 text-[10px] leading-tight">Карта ИИ-решений · QazInnovations</p>
+          </div>
+        </Link>
+
+        <div className="hidden lg:block h-6 w-px bg-white/10" />
+
+        {/* Navigation */}
+        <nav className="hidden lg:flex items-center gap-1 flex-1 overflow-x-auto">
+          {navLinks.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-all text-sm whitespace-nowrap"
+            >
+              <Icon size={14} className="shrink-0" />
+              <span>{label}</span>
+            </Link>
+          ))}
+
+          {/* AI Search link */}
+          <Link
+            href="/ai-search"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-amber-300/80 hover:text-amber-300 hover:bg-white/10 transition-all text-sm whitespace-nowrap border border-amber-400/20 ml-1"
+          >
+            <Sparkles size={14} className="shrink-0" />
+            <span>ИИ-поиск</span>
+          </Link>
+        </nav>
+
+        {/* Lang switcher */}
+        <LangSwitcher />
+
+        {/* Admin */}
+        <Link
+          href="/admin"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all text-sm shrink-0"
+        >
+          <Settings size={14} />
+          <span className="hidden md:block">{t('nav', 'admin')}</span>
+        </Link>
+
+        {/* Бургер (мобильные) */}
+        <button
+          type="button"
+          onClick={() => setMenuOpen(open => !open)}
+          className="lg:hidden flex items-center justify-center w-9 h-9 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+          aria-label={menuOpen ? 'Закрыть меню' : 'Открыть меню'}
+          aria-expanded={menuOpen}
+        >
+          {menuOpen ? <X size={18} /> : <Menu size={18} />}
+        </button>
+      </div>
+
+      {/* Мобильное меню */}
+      {menuOpen && (
+        <nav className="lg:hidden absolute top-14 inset-x-0 gov-header border-b border-white/10 shadow-xl z-40 p-3 space-y-1">
+          {navLinks.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-all text-sm"
+            >
+              <Icon size={15} className="shrink-0" />
+              {label}
+            </Link>
+          ))}
+          <Link
+            href="/ai-search"
+            onClick={() => setMenuOpen(false)}
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-amber-300/90 hover:text-amber-300 hover:bg-white/10 transition-all text-sm border border-amber-400/20"
+          >
+            <Sparkles size={15} className="shrink-0" />
+            ИИ-поиск
+          </Link>
+        </nav>
+      )}
+    </header>
+  )
+}

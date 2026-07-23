@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String?
+  password     String?
+  role         UserRole    @default(VIEWER)
+  universityId String?
+  university   University? @relation(fields: [universityId], references: [id], onDelete: SetNull)
+  image        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  sessions     Session[]
+  @@index([universityId])
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@map("sessions")
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  UNIVERSITY_REP
+  VIEWER
+}
+
+model Region {
+  id           String       @id @default(cuid())
+  name         String       @unique
+  nameKz       String?
+  code         String       @unique
+  center       String?
+  universities University[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  @@map("regions")
+}
+
+model University {
+  id          String         @id @default(cuid())
+  name        String
+  nameKz      String?
+  shortName   String?
+  logo        String?
+  regionId    String
+  region      Region         @relation(fields: [regionId], references: [id])
+  address     String?
+  website     String?
+  email       String?
+  phone       String?
+  rector      String?
+  description String?        @db.Text
+  type        UniversityType @default(STATE)
+  users       User[]
+  projects    Project[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  @@index([regionId])
+  @@map("universities")
+}
+
+enum UniversityType {
+  STATE
+  PRIVATE
+  NATIONAL
+  RESEARCH
+}
+
+model Project {
+  id            String          @id @default(cuid())
+  title         String
+  description   String          @db.Text
+  universityId  String
+  university    University      @relation(fields: [universityId], references: [id])
+  leadName      String?
+  leadEmail     String?
+  teamSize      Int?
+  launchDate    DateTime?
+  category      ProjectCategory
+  status        ProjectStatus   @default(IDEA)
+  technologies  Technology[]    @relation("ProjectTechnologies")
+  isBestPractice Boolean        @default(false)
+  isScalable    Boolean         @default(false)
+  impact        String?         @db.Text
+  results       String?         @db.Text
+
+  // Legacy file fields (kept for compatibility)
+  presentationPdf  String?
+  presentationPptx String?
+  agentPassportPdf String?   // URL to PDF passport
+  zoomLink         String?
+  videoUrl         String?
+  screenshots      String[]
+  documentation    String?
+
+  // NEW: Project files (acts, presentations, links)
+  files            ProjectFile[]
+
+  // NEW: Statistics
+  viewCount        Int            @default(0)
+  searchHitCount   Int            @default(0)
+
+  hearings         Hearing[]
+  tags             String[]
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  @@index([universityId])
+  @@index([status])
+  @@index([category])
+  @@index([createdAt])
+  @@map("projects")
+}
+
+// ── Project Files ─────────────────────────────────────────
+model ProjectFile {
+  id          String          @id @default(cuid())
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type        ProjectFileType
+  label       String                       // Display name
+  url         String                       // Link or path
+  size        Int?                         // bytes
+  createdAt   DateTime        @default(now())
+  @@index([projectId])
+  @@map("project_files")
+}
+
+enum ProjectFileType {
+  ACT             // Акт внедрения
+  PRESENTATION    // Презентация (PDF/PPTX)
+  DOCUMENTATION   // Документация
+  VIDEO           // Видео
+  ZOOM            // Zoom запись
+  LINK            // Внешняя ссылка
+  OTHER           // Прочее
+}
+
+enum ProjectCategory {
+  EDUCATION
+  SCIENCE
+  MANAGEMENT
+  ANALYTICS
+  GENERATIVE_AI
+  COMPUTER_VISION
+  ROBOTICS
+}
+
+enum ProjectStatus {
+  IDEA
+  PROTOTYPE
+  PILOT
+  IMPLEMENTED
+  SCALED
+}
+
+model Technology {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  slug     String    @unique
+  projects Project[] @relation("ProjectTechnologies")
+  @@map("technologies")
+}
+
+model Hearing {
+  id              String          @id @default(cuid())
+  projectId       String
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  date            DateTime
+  commission      String[]
+  remarks         String?         @db.Text
+  recommendations String?         @db.Text
+  decision        HearingDecision @default(PENDING)
+  decisionText    String?         @db.Text
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  @@index([projectId])
+  @@map("hearings")
+}
+
+enum HearingDecision {
+  PENDING
+  APPROVED
+  REJECTED
+  REVISION
+  RECOMMENDED
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  userEmail String
+  action    String   // CREATE | UPDATE | DELETE | IMPORT
+  entity    String   // project | university | user | hearing | passport | project_file | import...
+  entityId  String?
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}

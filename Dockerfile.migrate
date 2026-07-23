@@ -1,0 +1,30 @@
+FROM node:20-alpine
+
+RUN apk add --no-cache openssl
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY prisma ./prisma
+
+RUN npx prisma generate
+
+# prisma migrate deploy — применяет только закоммиченные миграции из prisma/migrations,
+# ничего не удаляет и не «синхронизирует» молча (в отличие от db push --accept-data-loss).
+#
+# Первый запуск на СУЩЕСТВУЮЩЕЙ базе (созданной раньше через db push):
+# deploy упадёт с P3005 («база не пустая») — тогда помечаем baseline 0_init
+# как уже применённую (resolve --applied) и повторяем deploy.
+# На свежей базе deploy просто применит 0_init и создаст схему.
+CMD sh -c " \
+  echo '⏳ Applying migrations (prisma migrate deploy)...' && \
+  if ! npx prisma migrate deploy; then \
+    echo '⚠️  Deploy failed — baselining existing database (0_init)...' && \
+    npx prisma migrate resolve --applied 0_init && \
+    npx prisma migrate deploy; \
+  fi && \
+  echo '🌱 Running seed (regions + technologies + admin only)...' && \
+  npx tsx prisma/seed.ts && \
+  echo '✅ Migration & seed complete!' \
+"

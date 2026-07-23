@@ -1,0 +1,142 @@
+export const dynamic = 'force-dynamic'
+
+import { UserRole } from '@prisma/client'
+import Link from 'next/link'
+import { ArrowRight, Building2, FolderKanban, Mic, Plus } from 'lucide-react'
+import { prisma } from '@/lib/prisma'
+import { canManageAllContent, requireUser } from '@/lib/auth'
+import { formatDate } from '@/lib/utils'
+
+export default async function AdminPage() {
+  const user = await requireUser('/admin')
+  const projectWhere = user.role === UserRole.UNIVERSITY_REP
+    ? { universityId: user.universityId || '__none__' }
+    : {}
+  const hearingWhere = user.role === UserRole.UNIVERSITY_REP
+    ? { project: { universityId: user.universityId || '__none__' } }
+    : {}
+
+  const [universities, projects, hearings] = await Promise.all([
+    canManageAllContent(user) ? prisma.university.count() : Promise.resolve(user.universityId ? 1 : 0),
+    prisma.project.count({ where: projectWhere }),
+    prisma.hearing.count({ where: hearingWhere }),
+  ])
+
+  const recentProjects = await prisma.project.findMany({
+    where: projectWhere,
+    take: 5,
+    orderBy: { createdAt: 'desc' },
+    include: { university: true },
+  })
+
+  const recentHearings = await prisma.hearing.findMany({
+    where: hearingWhere,
+    take: 5,
+    orderBy: { date: 'desc' },
+    include: { project: { include: { university: true } } },
+  })
+
+  const quickActions = [
+    canManageAllContent(user)
+      ? { href: '/admin/universities/new', label: 'Добавить вуз' }
+      : null,
+    user.role !== UserRole.VIEWER
+      ? { href: '/admin/projects/new', label: 'Добавить проект' }
+      : null,
+    user.role !== UserRole.VIEWER
+      ? { href: '/admin/import', label: 'Импорт из Excel' }
+      : null,
+    canManageAllContent(user)
+      ? { href: '/admin/hearings/new', label: 'Добавить заслушивание' }
+      : null,
+  ].filter(Boolean) as { href: string; label: string }[]
+
+  return (
+    <div>
+      <h1 className="text-xl font-bold text-slate-800 mb-6">Обзор</h1>
+
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        {[
+          { label: 'Вузов', value: universities, icon: Building2, href: '/admin/universities', color: 'text-blue-600 bg-blue-50', show: canManageAllContent(user) },
+          { label: 'Проектов', value: projects, icon: FolderKanban, href: '/admin/projects', color: 'text-violet-600 bg-violet-50', show: true },
+          { label: 'Заслушиваний', value: hearings, icon: Mic, href: '/admin/hearings', color: 'text-emerald-600 bg-emerald-50', show: canManageAllContent(user) },
+        ].filter(item => item.show).map(item => (
+          <Link key={item.label} href={item.href}>
+            <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-slate-300 transition-all">
+              <div className={`w-9 h-9 rounded-lg ${item.color} flex items-center justify-center mb-3`}>
+                <item.icon size={18} />
+              </div>
+              <div className="text-2xl font-bold text-slate-800">{item.value}</div>
+              <div className="text-sm text-slate-500 mt-0.5">{item.label}</div>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {quickActions.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-8">
+          {quickActions.map(action => (
+            <Link
+              key={action.href}
+              href={action.href}
+              className="flex items-center gap-2 justify-center py-3 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-500 hover:border-blue-300 hover:text-blue-600 transition-all"
+            >
+              <Plus size={15} />
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-slate-700">Последние проекты</h2>
+            <Link href="/admin/projects" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+              Все <ArrowRight size={11} />
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {recentProjects.map(project => (
+              <div key={project.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                <div className="min-w-0">
+                  <Link href={`/admin/projects/${project.id}/edit`} className="text-sm font-medium text-slate-700 hover:text-blue-600 truncate block">
+                    {project.title}
+                  </Link>
+                  <p className="text-xs text-slate-400">{project.university.shortName || project.university.name}</p>
+                </div>
+                <span className="text-xs text-slate-400 shrink-0 ml-2">{formatDate(project.createdAt)}</span>
+              </div>
+            ))}
+            {recentProjects.length === 0 && <p className="text-sm text-slate-400">Нет проектов</p>}
+          </div>
+        </div>
+
+        {canManageAllContent(user) && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-slate-700">Последние заслушивания</h2>
+              <Link href="/admin/hearings" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                Все <ArrowRight size={11} />
+              </Link>
+            </div>
+            <div className="space-y-2">
+              {recentHearings.map(hearing => (
+                <div key={hearing.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                  <div className="min-w-0">
+                    <Link href={`/admin/hearings/${hearing.id}/edit`} className="text-sm font-medium text-slate-700 hover:text-blue-600 truncate block">
+                      {hearing.project.title}
+                    </Link>
+                    <p className="text-xs text-slate-400">{hearing.project.university.shortName}</p>
+                  </div>
+                  <span className="text-xs text-slate-400 shrink-0 ml-2">{formatDate(hearing.date)}</span>
+                </div>
+              ))}
+              {recentHearings.length === 0 && <p className="text-sm text-slate-400">Нет заслушиваний</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

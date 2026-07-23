@@ -1,0 +1,95 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
+import { prisma } from '@/lib/prisma'
+import { canAccessUniversity, requireApiRole } from '@/lib/auth'
+import { deleteLocalUpload } from '@/lib/uploads'
+import { audit } from '@/lib/audit'
+import { UserRole } from '@prisma/client'
+
+export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const project = await prisma.project.findUnique({
+    where: { id },
+    select: { agentPassportPdf: true },
+  })
+  if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return NextResponse.json({ url: project.agentPassportPdf })
+}
+
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP])
+    if (response) return response
+
+    const { id } = await params
+    const existing = await prisma.project.findUnique({
+      where: { id },
+      select: { universityId: true, agentPassportPdf: true },
+    })
+    if (!existing) return NextResponse.json({ error: 'Проект не найден' }, { status: 404 })
+    if (!canAccessUniversity(user, existing.universityId)) {
+      return NextResponse.json({ error: 'Недостаточно прав для этого проекта' }, { status: 403 })
+    }
+
+    const { url } = await request.json()
+
+    // Basic sanity check on the URL to avoid storing garbage / javascript: links
+    if (url && !/^https?:\/\//i.test(url) && !url.startsWith('/uploads/')) {
+      return NextResponse.json(
+        { error: 'Ссылка должна начинаться с http(s):// или быть загруженным файлом (/uploads/)' },
+        { status: 400 }
+      )
+    }
+
+    const project = await prisma.project.update({
+      where: { id },
+      data: { agentPassportPdf: url || null },
+      select: { id: true, agentPassportPdf: true },
+    })
+
+    // Старый локальный PDF больше не нужен — удаляем с диска, чтобы
+    // volume с загрузками не рос бесконечно при каждой замене.
+    if (existing.agentPassportPdf && existing.agentPassportPdf !== (url || null)) {
+      await deleteLocalUpload(existing.agentPassportPdf)
+    }
+
+    await audit(user, 'UPDATE', 'passport', id, url ? 'установлен' : 'очищен')
+    revalidatePath(`/projects/${id}`)
+    return NextResponse.json(project)
+  } catch (error: any) {
+    console.error('Update passport error:', error)
+    return NextResponse.json({ error: 'Ошибка сохранения паспорта' }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP])
+    if (response) return response
+
+    const { id } = await params
+    const existing = await prisma.project.findUnique({
+      where: { id },
+      select: { universityId: true, agentPassportPdf: true },
+    })
+    if (!existing) return NextResponse.json({ error: 'Проект не найден' }, { status: 404 })
+    if (!canAccessUniversity(user, existing.universityId)) {
+      return NextResponse.json({ error: 'Недостаточно прав для этого проекта' }, { status: 403 })
+    }
+
+    await prisma.project.update({
+      where: { id },
+      data: { agentPassportPdf: null },
+    })
+
+    // Чистим файл с диска, чтобы не копить сироты в volume загрузок
+    await deleteLocalUpload(existing.agentPassportPdf)
+
+    await audit(user, 'DELETE', 'passport', id)
+    revalidatePath(`/projects/${id}`)
+    return NextResponse.json({ ok: true })
+  } catch (error: any) {
+    console.error('Delete passport error:', error)
+    return NextResponse.json({ error: 'Ошибка удаления паспорта' }, { status: 500 })
+  }
+}

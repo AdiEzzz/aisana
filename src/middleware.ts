@@ -35,9 +35,10 @@ function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.includes(pathname)) return true
   if (PUBLIC_API.some(path => pathname === path)) return true
 
-  // Статика и служебные файлы Next.js
+  // Статика Next.js и служебные пути Vercel (`/_vercel/insights` — скрипт и приём событий аналитики)
   if (
     pathname.startsWith('/_next/') ||
+    pathname.startsWith('/_vercel/') ||
     pathname.startsWith('/images/') ||
     pathname.startsWith('/data/') ||
     pathname.startsWith('/docs/') ||

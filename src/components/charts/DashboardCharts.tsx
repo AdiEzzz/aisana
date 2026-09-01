@@ -164,12 +164,17 @@ export function DashboardCharts({
 
       {/* Проекты по регионам */}
       <ChartCard title={t('dashboard', 'byRegion')}>
-        <ResponsiveContainer width="100%" height={300}>
+        {/*
+          Высота считается от числа регионов, а подписи выводятся все (interval={0}).
+          При фиксированной высоте Recharts сам прореживал ось и часть регионов
+          оставалась без названия — выглядело как пропавшие данные.
+        */}
+        <ResponsiveContainer width="100%" height={Math.max(300, byRegion.length * 26 + 40)}>
           <BarChart data={byRegion} layout="vertical" margin={{ left: 0, right: 20 }}>
             <CartesianGrid strokeDasharray="3 3" horizontal={false} />
             <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-            <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11 }}
-              tickFormatter={v => v.length > 20 ? v.slice(0, 20) + '…' : v} />
+            <YAxis type="category" dataKey="name" width={170} interval={0} tick={{ fontSize: 11 }}
+              tickFormatter={v => v.length > 19 ? v.slice(0, 18) + '…' : v} />
             <Tooltip />
             <Bar dataKey="count" fill="#1A56DB" radius={[0, 4, 4, 0]} name={t('dashboard', 'projects')} />
           </BarChart>
@@ -181,12 +186,12 @@ export function DashboardCharts({
         {technologies.length === 0 ? (
           <p className="text-slate-400 text-sm text-center py-8">{t('dashboard', 'noData')}</p>
         ) : (
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={Math.max(260, technologies.length * 30 + 40)}>
             <BarChart data={technologies} layout="vertical" margin={{ left: 0, right: 20 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-              <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 11 }}
-                tickFormatter={v => v.length > 18 ? v.slice(0, 18) + '…' : v} />
+              <YAxis type="category" dataKey="name" width={140} interval={0} tick={{ fontSize: 11 }}
+                tickFormatter={v => v.length > 18 ? v.slice(0, 17) + '…' : v} />
               <Tooltip />
               <Bar dataKey="count" fill="#0d9488" radius={[0, 4, 4, 0]} name={t('dashboard', 'projects')} />
             </BarChart>

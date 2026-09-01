@@ -21,6 +21,19 @@ export const metadata: Metadata = {
     locale: 'ru_RU',
     title: 'AiSana — карта ИИ-решений ВУЗов Казахстана',
     description: 'Единый портал мониторинга и анализа ИИ-проектов университетов Казахстана',
+    // Превью ссылки в WhatsApp, Telegram и соцсетях
+    images: [{
+      url: '/images/og-image.png',
+      width: 1200,
+      height: 630,
+      alt: 'AiSana — национальная карта ИИ-решений вузов Казахстана',
+    }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'AiSana — карта ИИ-решений ВУЗов Казахстана',
+    description: 'Единый портал мониторинга и анализа ИИ-проектов университетов Казахстана',
+    images: ['/images/og-image.png'],
   },
 }
 

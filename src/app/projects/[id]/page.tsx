@@ -5,6 +5,7 @@ export const revalidate = 60
 import { prisma } from '@/lib/prisma'
 import type { Metadata } from 'next'
 import { metaDescription } from '@/lib/seo'
+import { PublicationStatus } from '@prisma/client'
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params
@@ -13,10 +14,14 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     select: {
       title: true,
       description: true,
+      publication: true,
+      universityId: true,
       university: { select: { name: true, shortName: true } },
     },
   })
-  if (!project) return { title: 'Проект не найден' }
+  // Черновик или проект на проверке публично недоступен —
+  // отдаём «не найдено» до начала отрисовки страницы
+  if (!project || project.publication !== PublicationStatus.PUBLISHED) notFound()
 
   const uni = project.university.shortName || project.university.name
   const description = metaDescription(project.description, `ИИ-проект вуза ${uni}`)
@@ -43,6 +48,8 @@ import { AgentPassportViewer } from '@/components/project/AgentPassportViewer'
 import { ProjectFilesManager } from '@/components/project/ProjectFilesManager'
 import { ProjectStats } from '@/components/project/ProjectStats'
 import { ProjectStatsTab } from '@/components/project/ProjectStatsTab'
+import { ProjectTopics } from '@/components/project/ProjectTopics'
+import { TOPICS } from '@/lib/search/taxonomy'
 import { ShareButton } from '@/components/project/ShareButton'
 
 const HEARING_COLORS: Record<HearingDecision, string> = {
@@ -63,10 +70,15 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       technologies: true,
       hearings: { orderBy: { date: 'desc' } },
       files: { orderBy: { createdAt: 'asc' } },
+      topics: { orderBy: { score: 'desc' } },
     },
   })
 
-  if (!project) notFound()
+  // Неопубликованные проекты доступны только в админ-панели:
+  // просмотр и редактирование — на /admin/projects/[id]/edit
+  if (!project || project.publication !== PublicationStatus.PUBLISHED) notFound()
+
+  const topicLabels = Object.fromEntries(TOPICS.map(topic => [topic.id, topic.label]))
 
   // ── Overview tab ─────────────────────────────────────────
   const overviewContent = (
@@ -142,6 +154,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <p className="text-slate-400 text-sm">Заслушивания ещё не проводились</p>
         )}
       </div>
+
+      <ProjectTopics topics={project.topics} labels={topicLabels} />
 
       {project.tags.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">

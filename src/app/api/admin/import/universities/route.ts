@@ -5,6 +5,9 @@ import { requireApiRole } from '@/lib/auth'
 import { audit } from '@/lib/audit'
 import { parseUniversityWorkbook, importUniversitiesFromRows } from '@/lib/university-import'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 export async function POST(request: NextRequest) {
   try {
     const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR])

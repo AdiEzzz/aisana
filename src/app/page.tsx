@@ -4,6 +4,7 @@
 export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import { cached } from '@/lib/data-cache'
 import KazakhstanMap from '@/components/map/KazakhstanMap'
 import { Navbar } from '@/components/layout/Navbar'
@@ -13,13 +14,13 @@ async function getMapData() {
   const regions = await prisma.region.findMany({
     include: {
       universities: {
-        include: { _count: { select: { projects: true } } },
+        include: { _count: { select: { projects: { where: PUBLISHED_ONLY } } } },
       },
     },
   })
 
   const [totalProjects, totalUniversities] = await Promise.all([
-    prisma.project.count(),
+    prisma.project.count({ where: PUBLISHED_ONLY }),
     prisma.university.count(),
   ])
 

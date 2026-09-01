@@ -2,9 +2,11 @@ export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
 import { ExternalLink, Pencil, Plus } from 'lucide-react'
-import { Prisma, ProjectStatus, UserRole } from '@prisma/client'
+import { Prisma, ProjectStatus, PublicationStatus, UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/auth'
+import { canModerate } from '@/lib/publication'
+import { PublicationBadge, PublicationControl } from '@/components/admin/PublicationControl'
 import { STATUS_LABELS } from '@/types'
 import { DeleteProjectButton } from '../universities/DeleteButton'
 import { ListFilters } from '@/components/admin/ListFilters'
@@ -31,6 +33,7 @@ interface SearchParams {
   universityId?: string
   regionId?: string
   status?: string
+  publication?: string
   sort?: string
   page?: string
 }
@@ -57,6 +60,11 @@ export default async function AdminProjectsPage({ searchParams }: { searchParams
           ],
         }
       : {}),
+  }
+
+  // Фильтр по статусу публикации: удобно открыть очередь «На проверке»
+  if (params.publication && params.publication in PublicationStatus) {
+    where.publication = params.publication as PublicationStatus
   }
 
   const orderBy = SORTS[params.sort || 'newest'] || SORTS.newest
@@ -98,6 +106,15 @@ export default async function AdminProjectsPage({ searchParams }: { searchParams
       label: 'Все статусы',
       options: Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
     },
+    {
+      name: 'publication',
+      label: 'Все публикации',
+      options: [
+        { value: 'REVIEW', label: 'На проверке' },
+        { value: 'DRAFT', label: 'Черновики' },
+        { value: 'PUBLISHED', label: 'Опубликованные' },
+      ],
+    },
   ]
 
   return (
@@ -132,6 +149,7 @@ export default async function AdminProjectsPage({ searchParams }: { searchParams
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Проект</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Вуз</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Статус</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">Публикация</th>
               <th className="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wide">Действия</th>
             </tr>
           </thead>
@@ -153,6 +171,17 @@ export default async function AdminProjectsPage({ searchParams }: { searchParams
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[project.status]}`}>
                     {STATUS_LABELS[project.status]}
                   </span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-col items-start gap-1.5">
+                    <PublicationBadge publication={project.publication} />
+                    <PublicationControl
+                      projectId={project.id}
+                      publication={project.publication}
+                      canModerate={canModerate(user)}
+                      compact
+                    />
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center justify-end gap-2">

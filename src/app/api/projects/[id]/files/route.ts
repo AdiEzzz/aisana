@@ -4,7 +4,9 @@ import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { deleteLocalUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
-import { UserRole } from '@prisma/client'
+import { ProjectFileType, UserRole } from '@prisma/client'
+
+const FILE_TYPES = new Set<string>(Object.values(ProjectFileType))
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -30,6 +32,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const data = await request.json()
     if (!data.label || !data.url || !data.type) {
       return NextResponse.json({ error: 'label, url и type обязательны' }, { status: 400 })
+    }
+
+    // Та же проверка, что и у паспорта проекта: url рендерится как <a href>
+    // на публичной странице, поэтому javascript:-ссылки и прочий мусор
+    // не должны попадать в базу.
+    if (!/^https?:\/\//i.test(data.url) && !String(data.url).startsWith('/uploads/')) {
+      return NextResponse.json(
+        { error: 'Ссылка должна начинаться с http(s):// или быть загруженным файлом (/uploads/)' },
+        { status: 400 }
+      )
+    }
+
+    // Неизвестный тип раньше валился в 500 от Prisma — отвечаем понятной ошибкой
+    if (!FILE_TYPES.has(String(data.type))) {
+      return NextResponse.json({ error: 'Неизвестный тип файла' }, { status: 400 })
     }
 
     const file = await prisma.projectFile.create({

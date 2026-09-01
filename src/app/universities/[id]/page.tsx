@@ -3,6 +3,7 @@
 export const revalidate = 60
 
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import type { Metadata } from 'next'
 import { metaDescription } from '@/lib/seo'
 
@@ -37,6 +38,7 @@ export default async function UniversityPage({ params }: { params: Promise<{ id:
     include: {
       region: true,
       projects: {
+        where: PUBLISHED_ONLY,
         include: {
           university: { include: { region: true } },
           technologies: true,

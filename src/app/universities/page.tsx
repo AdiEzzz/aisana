@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import { PageLayout } from '@/components/layout/PageLayout'
 import Link from 'next/link'
 import { Building2, FolderKanban, MapPin, ExternalLink, Plus } from 'lucide-react'
@@ -16,7 +17,7 @@ async function getUniversities(q?: string, region?: string) {
     },
     include: {
       region: true,
-      _count: { select: { projects: true } },
+      _count: { select: { projects: { where: PUBLISHED_ONLY } } },
     },
     orderBy: [{ projects: { _count: 'desc' } }, { name: 'asc' }],
   })

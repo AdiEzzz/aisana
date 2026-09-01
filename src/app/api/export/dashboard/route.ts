@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import { translations } from '@/lib/i18n'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
 
     const [projects, regions, technologies] = await Promise.all([
       prisma.project.findMany({
+        where: PUBLISHED_ONLY,
         include: {
           university: { select: { name: true, shortName: true, region: { select: { name: true } } } },
           technologies: { select: { name: true } },

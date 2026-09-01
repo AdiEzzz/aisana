@@ -41,3 +41,6 @@ next-env.d.ts
 
 # локальные бэкапы БД
 /backups/
+
+.env*
+!.env.example

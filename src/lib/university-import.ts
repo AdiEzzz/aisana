@@ -19,7 +19,7 @@ export interface UniversityImportSummary {
 }
 
 const FIELD_ALIASES = {
-  name:        ['name', 'название', 'полное название', 'наименование', 'университет', 'вуз'],
+  name:        ['name', 'название', 'название вуза', 'наименование вуза', 'полное название', 'наименование', 'университет', 'вуз'],
   nameKz:      ['namekz', 'название на казахском', 'казахское название', 'атауы'],
   shortName:   ['shortname', 'аббревиатура', 'краткое название', 'short', 'код'],
   region:      ['region', 'регион', 'область', 'город', 'код региона'],
@@ -85,7 +85,13 @@ function parseType(value: unknown): UniversityType {
 }
 
 export function parseUniversityWorkbook(buffer: Buffer): RawRow[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+  // CSV: срезаем UTF-8 BOM (иначе он приклеивается к первому заголовку)
+  // и читаем в UTF-8 (codepage 65001). Без этого кириллические заголовки
+  // CSV без BOM декодировались неверно и все строки молча пропускались.
+  const clean = buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
+    ? buffer.subarray(3)
+    : buffer
+  const workbook = XLSX.read(clean, { type: 'buffer', cellDates: true, codepage: 65001 })
   const firstSheetName = workbook.SheetNames[0]
   if (!firstSheetName) return []
   return XLSX.utils.sheet_to_json<RawRow>(workbook.Sheets[firstSheetName], {
@@ -118,6 +124,13 @@ export async function importUniversitiesFromRows(
     regionIndex.set(normalize(r.name), r.id)
     regionIndex.set(normalize(r.code), r.id)
     if (r.nameKz) regionIndex.set(normalize(r.nameKz), r.id)
+
+    // Города принимаем и с уточнением в скобках: в старых таблицах
+    // встречается «Алматы (город)», «Шымкент (город)» — раньше регион
+    // назывался так же, и файлы вузов делались по нему.
+    if (r.code === 'ALA') regionIndex.set(normalize('Алматы (город)'), r.id)
+    if (r.code === 'SHY') regionIndex.set(normalize('Шымкент (город)'), r.id)
+    if (r.code === 'AST') regionIndex.set(normalize('Астана (город)'), r.id)
   }
 
   // Build existing university lookup by name + shortName

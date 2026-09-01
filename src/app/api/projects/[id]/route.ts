@@ -4,6 +4,7 @@ import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { deleteLocalUpload } from '@/lib/uploads'
+import { invalidateSearchIndex, reclassifyProject } from '@/lib/search/store'
 import { audit } from '@/lib/audit'
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -63,6 +64,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         technologies: { set: data.technologyIds?.map((technologyId: string) => ({ id: technologyId })) || [] },
       },
     })
+    // Текст изменился — пересчитываем направления и сбрасываем индекс
+    await reclassifyProject(project.id, prisma).catch(err =>
+      console.error('Не удалось классифицировать проект', project.id, err))
+    invalidateSearchIndex()
+
     await audit(user, 'UPDATE', 'project', project.id, project.title)
     revalidatePath(`/projects/${project.id}`)
     revalidatePath(`/universities/${project.universityId}`)
@@ -101,6 +107,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       await deleteLocalUpload(file.url)
     }
 
+    invalidateSearchIndex()
     await audit(user, 'DELETE', 'project', id)
     revalidatePath(`/projects/${id}`)
     revalidatePath(`/universities/${existing.universityId}`)

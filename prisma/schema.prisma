@@ -119,13 +119,51 @@ model Project {
   hearings         Hearing[]
   tags             String[]
 
+  // Тематические направления, вычисленные классификатором (см. lib/search).
+  // Пересчитываются при сохранении проекта и командой переиндексации.
+  topics           ProjectTopic[]
+
+  // Модерация: на публичной части видны только PUBLISHED.
+  // Представитель вуза создаёт черновик и отправляет на проверку,
+  // публикует администратор или редактор.
+  publication      PublicationStatus @default(PUBLISHED)
+  submittedAt      DateTime?         // когда отправлен на проверку
+  publishedAt      DateTime?         // когда опубликован
+  moderationNote   String?           @db.Text  // комментарий модератора при возврате
+
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   @@index([universityId])
   @@index([status])
   @@index([category])
   @@index([createdAt])
+  @@index([publication])
   @@map("projects")
+}
+
+enum PublicationStatus {
+  DRAFT      // черновик вуза, виден только автору и администраторам
+  REVIEW     // отправлен на проверку
+  PUBLISHED  // опубликован на портале
+}
+
+// ── Тематическая классификация проекта ────────────────────
+// Один проект относится сразу к нескольким направлениям, у каждого
+// свой коэффициент релевантности и объяснение, почему он туда попал.
+model ProjectTopic {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  topic       String   // идентификатор направления из lib/search/taxonomy
+  score       Int      // коэффициент релевантности 0–100
+  explanation String   @db.Text
+  signals     String[] // признаки, по которым сработала классификация
+  updatedAt   DateTime @updatedAt
+
+  @@unique([projectId, topic])
+  @@index([topic])
+  @@index([score])
+  @@map("project_topics")
 }
 
 // ── Project Files ─────────────────────────────────────────
@@ -214,4 +252,35 @@ model AuditLog {
 
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ── Обратная связь с портала ──────────────────────────────
+model Feedback {
+  id           String       @id @default(cuid())
+  topic        FeedbackTopic @default(QUESTION)
+  name         String
+  email        String
+  organization String?
+  message      String       @db.Text
+  status       FeedbackStatus @default(NEW)
+  adminNote    String?      @db.Text
+  createdAt    DateTime     @default(now())
+  handledAt    DateTime?
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("feedback")
+}
+
+enum FeedbackTopic {
+  ACCESS_REQUEST // запрос доступа для вуза
+  ADD_PROJECT    // предложить проект
+  BUG            // ошибка на портале
+  QUESTION       // общий вопрос
+}
+
+enum FeedbackStatus {
+  NEW
+  IN_PROGRESS
+  DONE
 }

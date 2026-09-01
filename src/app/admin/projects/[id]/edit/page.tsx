@@ -3,10 +3,12 @@ export const dynamic = 'force-dynamic'
 import { notFound } from 'next/navigation'
 import { ExternalLink } from 'lucide-react'
 import { BackButton } from '@/components/admin/BackButton'
-import { UserRole } from '@prisma/client'
+import { PublicationStatus, UserRole } from '@prisma/client'
 import { ProjectForm } from '@/components/forms/ProjectForm'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireRole } from '@/lib/auth'
+import { canModerate } from '@/lib/publication'
+import { PublicationBadge, PublicationControl } from '@/components/admin/PublicationControl'
 
 export default async function EditProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireRole([UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP], '/admin/projects')
@@ -33,18 +35,43 @@ export default async function EditProjectPage({ params }: { params: Promise<{ id
     <div>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <BackButton fallback="/admin/projects" />
-        <a
-          href={`/projects/${project.id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 px-3 py-1.5 rounded-lg mb-6 transition-colors"
-        >
-          <ExternalLink size={13} /> Открыть на сайте
-        </a>
+        {project.publication === PublicationStatus.PUBLISHED && (
+          <a
+            href={`/projects/${project.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 px-3 py-1.5 rounded-lg mb-6 transition-colors"
+          >
+            <ExternalLink size={13} /> Открыть на сайте
+          </a>
+        )}
       </div>
-      <h1 className="text-xl font-bold text-slate-800 mb-6">
+      <h1 className="text-xl font-bold text-slate-800 mb-4">
         Редактировать: {project.title}
       </h1>
+
+      {/* Статус публикации и действия модерации */}
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
+        <span className="text-sm text-slate-500">Публикация:</span>
+        <PublicationBadge publication={project.publication} />
+        <PublicationControl
+          projectId={project.id}
+          publication={project.publication}
+          canModerate={canModerate(user)}
+        />
+        {project.publication !== PublicationStatus.PUBLISHED && (
+          <p className="w-full text-xs text-slate-400">
+            {project.publication === PublicationStatus.DRAFT
+              ? 'Черновик виден только в админ-панели. Отправьте на проверку, когда всё заполнено.'
+              : 'Проект ждёт проверки администратора и пока не показывается на портале.'}
+          </p>
+        )}
+        {project.moderationNote && (
+          <p className="w-full rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Комментарий модератора: {project.moderationNote}
+          </p>
+        )}
+      </div>
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <ProjectForm
           universities={universities}

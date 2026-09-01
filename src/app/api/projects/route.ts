@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { UserRole } from '@prisma/client'
+import { PublicationStatus, UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY, canModerate } from '@/lib/publication'
+import { invalidateSearchIndex, loadSearchIndex, reclassifyProject } from '@/lib/search/store'
+import { searchIndex } from '@/lib/search/engine'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { audit } from '@/lib/audit'
 
@@ -21,8 +24,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Недостаточно прав для этого вуза' }, { status: 403 })
     }
 
+    // Модерация: представитель вуза создаёт черновик — на портал проект
+    // попадёт только после проверки. Администратор и редактор публикуют сразу.
+    const publication = canModerate(user) ? PublicationStatus.PUBLISHED : PublicationStatus.DRAFT
+
     const project = await prisma.project.create({
       data: {
+        publication,
+        publishedAt: publication === PublicationStatus.PUBLISHED ? new Date() : null,
         title: data.title,
         description: data.description,
         universityId,
@@ -48,6 +57,11 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    // Сразу раскладываем проект по тематическим направлениям
+    await reclassifyProject(project.id, prisma).catch(err =>
+      console.error('Не удалось классифицировать проект', project.id, err))
+    invalidateSearchIndex()
+
     await audit(user, 'CREATE', 'project', project.id, project.title)
     revalidatePath(`/universities/${project.universityId}`)
     return NextResponse.json(project, { status: 201 })
@@ -66,15 +80,7 @@ export async function GET(request: NextRequest) {
 
     const projects = await prisma.project.findMany({
       where: {
-        ...(q
-          ? {
-              OR: [
-                { title: { contains: q, mode: 'insensitive' } },
-                { description: { contains: q, mode: 'insensitive' } },
-                { tags: { has: q } },
-              ],
-            }
-          : {}),
+        ...PUBLISHED_ONLY,
         ...(status ? { status: status as any } : {}),
         ...(category ? { category: category as any } : {}),
       },
@@ -85,7 +91,19 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json(projects)
+    // Текстовый запрос обрабатывает смысловой движок поиска,
+    // а не совпадение подстроки: см. src/lib/search
+    if (!q?.trim()) return NextResponse.json(projects)
+
+    const index = await loadSearchIndex(prisma)
+    const { hits } = searchIndex(index, q, { limit: 500 })
+    const rank = new Map(hits.map((hit, position) => [hit.id, position]))
+
+    const ranked = projects
+      .filter(project => rank.has(project.id))
+      .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+
+    return NextResponse.json(ranked)
   } catch {
     return NextResponse.json({ error: 'Ошибка загрузки' }, { status: 500 })
   }

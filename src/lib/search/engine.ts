@@ -1,0 +1,271 @@
+/**
+ * Поисковый движок портала.
+ *
+ * Ранжирование складывается из двух независимых сигналов:
+ *
+ *  1. Смысловой — совпадение направлений запроса с направлениями проекта.
+ *     Именно он находит «нейросеть для обнаружения дефектов сварки»
+ *     по запросу «промышленность», хотя такого слова в тексте нет.
+ *
+ *  2. Лексический — совпадение слов запроса с текстом проекта по всем полям
+ *     сразу, с учётом словоформ и опечаток.
+ *
+ * Каждый результат несёт разбор: сколько дал каждый сигнал, какие поля
+ * сработали и почему проект попал в выдачу (режим отладки).
+ */
+
+import { classifyProject, type ClassifiableProject, type TopicMatch } from './classify'
+import { parseQuery, type ParsedQuery } from './query'
+import { fuzzyMatches, normalize, tokenize } from './text'
+import type { TopicId } from './taxonomy'
+
+/** Поля, по которым идёт лексический поиск, и их вклад в оценку. */
+const SEARCH_FIELDS = {
+  title: 5,
+  tags: 3,
+  technologies: 3,
+  description: 2,
+  impact: 1.2,
+  results: 1.2,
+  category: 1,
+  status: 0.6,
+  university: 0.6,
+  region: 0.5,
+  leadName: 0.4,
+} as const
+
+type SearchField = keyof typeof SEARCH_FIELDS
+
+const FIELD_LABELS: Record<SearchField, string> = {
+  title: 'название',
+  tags: 'теги',
+  technologies: 'технологии',
+  description: 'описание',
+  impact: 'влияние',
+  results: 'результаты',
+  category: 'категория',
+  status: 'статус',
+  university: 'вуз',
+  region: 'регион',
+  leadName: 'руководитель',
+}
+
+export interface IndexableProject extends ClassifiableProject {
+  id: string
+  status?: string | null
+  isBestPractice?: boolean | null
+  leadName?: string | null
+  university?: { name?: string | null; shortName?: string | null; region?: { name?: string | null } | null } | null
+}
+
+export interface IndexedProject {
+  id: string
+  topics: TopicMatch[]
+  topicScore: Map<TopicId, number>
+  fields: Record<SearchField, { text: string; tokens: string[] }>
+  isBestPractice: boolean
+}
+
+export interface SearchHit {
+  id: string
+  /** Итоговая оценка 0–100 */
+  score: number
+  topics: TopicMatch[]
+  debug: {
+    /** Вклад смыслового сигнала */
+    topicPoints: number
+    /** Вклад лексического сигнала */
+    lexicalPoints: number
+    /** Доля слов запроса, найденных в проекте */
+    coverage: number
+    /** Какие поля сработали и с каким вкладом */
+    matchedFields: { field: string; label: string; terms: string[]; points: number }[]
+    /** Совпавшие направления */
+    matchedTopics: { topic: TopicId; label: string; queryWeight: number; projectScore: number; points: number }[]
+    /** Почему проект попал в результаты — человеческим языком */
+    reason: string
+  }
+}
+
+const CATEGORY_TEXT: Record<string, string> = {
+  EDUCATION: 'образование обучение',
+  SCIENCE: 'наука исследования',
+  MANAGEMENT: 'управление менеджмент',
+  ANALYTICS: 'аналитика данные',
+  GENERATIVE_AI: 'генеративный ии llm',
+  COMPUTER_VISION: 'компьютерное зрение изображения',
+  ROBOTICS: 'робототехника роботы',
+}
+
+const STATUS_TEXT: Record<string, string> = {
+  IDEA: 'идея концепция',
+  PROTOTYPE: 'прототип',
+  PILOT: 'пилот пилотный проект',
+  IMPLEMENTED: 'внедрено внедрение',
+  SCALED: 'масштабировано тиражирование',
+}
+
+/** Готовит проект к поиску: классифицирует и раскладывает текст по полям. */
+export function indexProject(project: IndexableProject): IndexedProject {
+  const topics = classifyProject(project)
+
+  const raw: Record<SearchField, string> = {
+    title: project.title ?? '',
+    tags: (project.tags ?? []).join(' '),
+    technologies: (project.technologies ?? []).map(t => t.name).join(' '),
+    description: project.description ?? '',
+    impact: project.impact ?? '',
+    results: project.results ?? '',
+    category: CATEGORY_TEXT[String(project.category ?? '')] ?? '',
+    status: STATUS_TEXT[String(project.status ?? '')] ?? '',
+    university: [project.university?.name, project.university?.shortName].filter(Boolean).join(' '),
+    region: project.university?.region?.name ?? '',
+    leadName: project.leadName ?? '',
+  }
+
+  const fields = {} as IndexedProject['fields']
+  for (const field of Object.keys(SEARCH_FIELDS) as SearchField[]) {
+    const text = normalize(raw[field])
+    fields[field] = { text, tokens: tokenize(text) }
+  }
+
+  return {
+    id: project.id,
+    topics,
+    topicScore: new Map(topics.map(t => [t.topic, t.score])),
+    fields,
+    isBestPractice: Boolean(project.isBestPractice),
+  }
+}
+
+/** Оценивает один проиндексированный проект по разобранному запросу. */
+function scoreProject(indexed: IndexedProject, query: ParsedQuery): SearchHit | null {
+  // ── Смысловой сигнал ──────────────────────────────────────
+  let topicPoints = 0
+  const matchedTopics: SearchHit['debug']['matchedTopics'] = []
+
+  for (const intent of query.topics) {
+    const projectScore = indexed.topicScore.get(intent.topic)
+    if (!projectScore) continue
+    const points = intent.weight * (projectScore / 100) * 70
+    topicPoints += points
+    matchedTopics.push({
+      topic: intent.topic,
+      label: intent.label,
+      queryWeight: Math.round(intent.weight * 100) / 100,
+      projectScore,
+      points: Math.round(points * 10) / 10,
+    })
+  }
+
+  // ── Лексический сигнал ────────────────────────────────────
+  let lexicalPoints = 0
+  const matchedFields = new Map<SearchField, { terms: Set<string>; points: number }>()
+  const foundQueryTokens = new Set<string>()
+
+  for (const token of query.tokens) {
+    for (const field of Object.keys(SEARCH_FIELDS) as SearchField[]) {
+      const { tokens } = indexed.fields[field]
+      if (!tokens.length) continue
+
+      const hit = tokens.some(word => fuzzyMatches(word, token))
+      if (!hit) continue
+
+      const weight = SEARCH_FIELDS[field]
+      lexicalPoints += weight
+      foundQueryTokens.add(token)
+
+      const entry = matchedFields.get(field) ?? { terms: new Set<string>(), points: 0 }
+      entry.terms.add(token)
+      entry.points += weight
+      matchedFields.set(field, entry)
+    }
+  }
+
+  // Точная фраза запроса в названии или описании — сильный сигнал
+  if (query.tokens.length > 1) {
+    if (indexed.fields.title.text.includes(query.text)) lexicalPoints += 8
+    else if (indexed.fields.description.text.includes(query.text)) lexicalPoints += 4
+  }
+
+  const coverage = query.tokens.length ? foundQueryTokens.size / query.tokens.length : 0
+
+  // Полное покрытие запроса словами проекта — заметная надбавка,
+  // иначе длинные запросы теряются среди частичных совпадений
+  if (coverage === 1 && query.tokens.length > 1) lexicalPoints *= 1.25
+
+  const rawScore = topicPoints + lexicalPoints
+  if (rawScore < 3) return null
+
+  // Лучшие практики чуть выше при прочих равных
+  const bonus = indexed.isBestPractice ? 1.03 : 1
+  const score = Math.min(100, Math.round(rawScore * bonus))
+
+  const fieldsDebug = [...matchedFields.entries()]
+    .map(([field, entry]) => ({
+      field,
+      label: FIELD_LABELS[field],
+      terms: [...entry.terms],
+      points: Math.round(entry.points * 10) / 10,
+    }))
+    .sort((a, b) => b.points - a.points)
+
+  return {
+    id: indexed.id,
+    score,
+    topics: indexed.topics,
+    debug: {
+      topicPoints: Math.round(topicPoints * 10) / 10,
+      lexicalPoints: Math.round(lexicalPoints * 10) / 10,
+      coverage: Math.round(coverage * 100) / 100,
+      matchedFields: fieldsDebug,
+      matchedTopics: matchedTopics.sort((a, b) => b.points - a.points),
+      reason: buildReason(matchedTopics, fieldsDebug),
+    },
+  }
+}
+
+function buildReason(
+  topics: SearchHit['debug']['matchedTopics'],
+  fields: SearchHit['debug']['matchedFields'],
+): string {
+  const parts: string[] = []
+
+  if (topics.length) {
+    const list = topics.slice(0, 3).map(t => `${t.label} (${t.projectScore})`).join(', ')
+    parts.push(`совпали направления: ${list}`)
+  }
+  if (fields.length) {
+    const list = fields.slice(0, 3)
+      .map(f => `${f.label} — ${f.terms.map(t => `«${t}»`).join(', ')}`)
+      .join('; ')
+    parts.push(`слова запроса найдены: ${list}`)
+  }
+
+  return parts.length ? parts.join('; ') : 'слабое совпадение по тексту'
+}
+
+export interface SearchOptions {
+  limit?: number
+  /** Порог оценки: ниже него результаты не показываются */
+  minScore?: number
+}
+
+/** Ищет по подготовленному индексу и возвращает результаты по убыванию оценки. */
+export function searchIndex(
+  index: IndexedProject[],
+  rawQuery: string,
+  options: SearchOptions = {},
+): { query: ParsedQuery; hits: SearchHit[] } {
+  const query = parseQuery(rawQuery)
+  const minScore = options.minScore ?? 0
+  const limit = options.limit ?? 100
+
+  const hits = index
+    .map(item => scoreProject(item, query))
+    .filter((hit): hit is SearchHit => hit !== null && hit.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+
+  return { query, hits }
+}

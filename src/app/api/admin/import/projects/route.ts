@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { parseProjectWorkbook, importProjectsFromRows } from '@/lib/project-import'
 import { requireApiRole } from '@/lib/auth'
 import { audit } from '@/lib/audit'
+import { invalidateSearchIndex, reindexAllProjects } from '@/lib/search/store'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,6 +36,10 @@ export async function POST(request: NextRequest) {
 
     const result = await importProjectsFromRows(prisma, rows, user, dryRun)
     if (!dryRun) {
+      // После массового импорта пересчитываем направления и сбрасываем индекс
+      await reindexAllProjects(prisma).catch(err =>
+        console.error('Переиндексация после импорта не удалась', err))
+      invalidateSearchIndex()
       await audit(user, 'IMPORT', 'projects', null, `строк: ${rows.length}`)
     }
     return NextResponse.json(result)

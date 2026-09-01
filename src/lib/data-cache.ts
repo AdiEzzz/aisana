@@ -24,3 +24,8 @@ export async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>
   store.set(key, { value, expiresAt: now + ttlMs })
   return value
 }
+
+/** Сбрасывает запись кэша — например, поисковый индекс после правки проекта. */
+export function invalidate(key: string): void {
+  store.delete(key)
+}

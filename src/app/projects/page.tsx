@@ -1,4 +1,7 @@
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
+import { loadSearchIndex } from '@/lib/search/store'
+import { searchIndex } from '@/lib/search/engine'
 import { PageLayout } from '@/components/layout/PageLayout'
 import { ProjectCard } from '@/components/ui/project-card'
 import Link from 'next/link'
@@ -7,21 +10,19 @@ import { ProjectCategory, ProjectStatus } from '@prisma/client'
 import { CATEGORY_LABELS, STATUS_LABELS } from '@/types'
 
 async function getProjects(params: {
-  q?: string; status?: string; category?: string; tech?: string; region?: string
+  q?: string; status?: string; category?: string; tech?: string; region?: string; topic?: string
 }) {
-  return prisma.project.findMany({
+  // Фильтры считает база, а текстовый запрос — смысловой движок поиска:
+  // раньше здесь было совпадение подстроки по трём полям, из-за чего
+  // «заводы» не находили «завод», а теги и технологии не искались вовсе.
+  const projects = await prisma.project.findMany({
     where: {
-      ...(params.q ? {
-        OR: [
-          { title: { contains: params.q, mode: 'insensitive' } },
-          { description: { contains: params.q, mode: 'insensitive' } },
-          { leadName: { contains: params.q, mode: 'insensitive' } },
-        ],
-      } : {}),
+      ...PUBLISHED_ONLY,
       ...(params.status ? { status: params.status as ProjectStatus } : {}),
       ...(params.category ? { category: params.category as ProjectCategory } : {}),
       ...(params.tech ? { technologies: { some: { slug: params.tech } } } : {}),
       ...(params.region ? { university: { region: { code: params.region.toUpperCase() } } } : {}),
+      ...(params.topic ? { topics: { some: { topic: params.topic } } } : {}),
     },
     include: {
       university: { include: { region: true } },
@@ -29,13 +30,23 @@ async function getProjects(params: {
     },
     orderBy: { createdAt: 'desc' },
   })
+
+  if (!params.q?.trim()) return projects
+
+  const index = await loadSearchIndex(prisma)
+  const { hits } = searchIndex(index, params.q, { limit: 500 })
+  const rank = new Map(hits.map((hit, position) => [hit.id, position]))
+
+  return projects
+    .filter(project => rank.has(project.id))
+    .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
 }
 
 async function getFilterOptions() {
   const [technologies, regions] = await Promise.all([
     prisma.technology.findMany({ orderBy: { name: 'asc' } }),
     prisma.region.findMany({
-      where: { universities: { some: { projects: { some: {} } } } },
+      where: { universities: { some: { projects: { some: PUBLISHED_ONLY } } } },
       orderBy: { name: 'asc' },
     }),
   ])
@@ -45,7 +56,7 @@ async function getFilterOptions() {
 export default async function ProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; category?: string; tech?: string; region?: string }>
+  searchParams: Promise<{ q?: string; status?: string; category?: string; tech?: string; region?: string; topic?: string }>
 }) {
   const sp = await searchParams
   const [projects, { technologies, regions }] = await Promise.all([

@@ -1,10 +1,33 @@
-// ISR: страница отдаётся из кэша мгновенно и пересобирается в фоне
-// не чаще раза в 60 секунд — изменения из админки появляются с задержкой до минуты
-export const revalidate = 60
+// Страница зависит от пользователя (cookies) — всегда per-request
+export const dynamic = 'force-dynamic'
+
 import { PageLayout } from '@/components/layout/PageLayout'
 import { AISearchWidget } from '@/components/search/AISearchWidget'
+import { canManageAllContent, getCurrentUser } from '@/lib/auth'
+import { AccessDenied } from '@/components/layout/AccessDenied'
 
-export default function AISearchPage() {
+export default async function AISearchPage() {
+  const user = await getCurrentUser()
+
+  // ИИ-поиск расходует платную квоту Gemini на каждый запрос,
+  // поэтому доступен только сотрудникам оператора портала (ADMIN и EDITOR).
+  if (!user) {
+    return (
+      <AccessDenied
+        title="Требуется авторизация"
+        description="ИИ-поиск доступен только авторизованным пользователям."
+        showLogin
+        nextPath="/ai-search"
+      />
+    )
+  }
+
+  if (!canManageAllContent(user)) {
+    return (
+      <AccessDenied description="ИИ-поиск доступен только администраторам и редакторам портала. Обычный поиск по проектам — в разделе «Проекты»." />
+    )
+  }
+
   return (
     <PageLayout>
       <div className="max-w-3xl mx-auto">

@@ -2,40 +2,38 @@
 export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import { PageLayout } from '@/components/layout/PageLayout'
 import { ProjectCard } from '@/components/ui/project-card'
-import { Star, TrendingUp, Lock } from 'lucide-react'
-import { getCurrentUser } from '@/lib/auth'
-import Link from 'next/link'
+import { Star, TrendingUp } from 'lucide-react'
+import { canManageAllContent, getCurrentUser } from '@/lib/auth'
+import { AccessDenied } from '@/components/layout/AccessDenied'
 
 export default async function BestPracticesPage() {
   const user = await getCurrentUser()
 
-  // Закрыто для неавторизованных
+  // Раздел содержит внутреннюю аналитику по проектам вузов,
+  // поэтому открыт только сотрудникам оператора портала (ADMIN и EDITOR).
   if (!user) {
     return (
-      <PageLayout>
-        <div className="flex flex-col items-center justify-center py-32 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-            <Lock size={28} className="text-slate-400" />
-          </div>
-          <h1 className="text-xl font-bold text-slate-700 mb-2">Требуется авторизация</h1>
-          <p className="text-slate-400 text-sm max-w-sm mb-6">
-            Раздел «Лучшие проекты» доступен только авторизованным пользователям.
-          </p>
-          <Link
-            href="/login"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          >
-            Войти
-          </Link>
-        </div>
-      </PageLayout>
+      <AccessDenied
+        title="Требуется авторизация"
+        description="Раздел «Лучшие проекты» доступен только авторизованным пользователям."
+        showLogin
+        nextPath="/best-practices"
+      />
+    )
+  }
+
+  if (!canManageAllContent(user)) {
+    return (
+      <AccessDenied description="Раздел «Лучшие проекты» доступен только администраторам и редакторам портала." />
     )
   }
 
   const bestPractices = await prisma.project.findMany({
     where: {
+      ...PUBLISHED_ONLY,
       OR: [{ isBestPractice: true }, { isScalable: true }],
     },
     include: {

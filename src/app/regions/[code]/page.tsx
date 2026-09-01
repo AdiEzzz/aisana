@@ -3,12 +3,22 @@
 export const revalidate = 60
 
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import type { Metadata } from 'next'
+import { notFound } from 'next/navigation'
 
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const { code } = await params
-  const region = await prisma.region.findFirst({ where: { code }, select: { name: true } })
-  if (!region) return { title: 'Регион не найден' }
+  // Коды регионов в БД хранятся в верхнем регистре, а ссылки с карты
+  // ведут на /regions/ast — без toUpperCase() метаданные не находили регион
+  // и во вкладке браузера мелькало «Регион не найден», хотя страница открывалась.
+  const region = await prisma.region.findFirst({
+    where: { code: code.toUpperCase() },
+    select: { name: true },
+  })
+  // Несуществующий код — сразу отдаём страницу «не найдено»,
+  // чтобы во вкладке не появлялся заголовок «Регион не найден»
+  if (!region) notFound()
   const description = `ИИ-проекты и вузы региона ${region.name}: карта решений, статистика, лучшие практики`
   return {
     title: region.name,
@@ -17,7 +27,6 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
   }
 }
 import { PageLayout } from '@/components/layout/PageLayout'
-import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Building2, FolderKanban, CheckCircle } from 'lucide-react'
 import { ProjectCard } from '@/components/ui/project-card'
@@ -29,8 +38,9 @@ export default async function RegionPage({ params }: { params: Promise<{ code: s
     include: {
       universities: {
         include: {
-          _count: { select: { projects: true } },
+          _count: { select: { projects: { where: PUBLISHED_ONLY } } },
           projects: {
+            where: PUBLISHED_ONLY,
             include: { university: { include: { region: true } }, technologies: true },
             orderBy: { createdAt: 'desc' },
             take: 6,

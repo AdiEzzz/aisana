@@ -1,0 +1,101 @@
+/**
+ * Разбор текста для поиска и классификации.
+ *
+ * Русский язык сильно склоняется: «завод», «заводы», «заводской», «на заводах» —
+ * это одно и то же слово для человека, но разные строки для базы. Поэтому
+ * словари признаков хранят ОСНОВЫ («завод», «производств»), а совпадение
+ * проверяется по началу слова. Это заменяет полноценный стеммер и при этом
+ * предсказуемо: видно, какая основа что поймала.
+ */
+
+/** Приводит текст к сравнимому виду: нижний регистр, ё→е, латиница и кириллица, цифры. */
+export function normalize(input: string | null | undefined): string {
+  return String(input ?? '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Слова текста без служебных коротышей. */
+export function tokenize(input: string | null | undefined): string[] {
+  const normalized = normalize(input)
+  if (!normalized) return []
+  return normalized.split(' ').filter(word => word.length >= 2 && !STOP_WORDS.has(word))
+}
+
+const STOP_WORDS = new Set([
+  'и', 'в', 'на', 'с', 'по', 'для', 'из', 'к', 'от', 'до', 'за', 'при', 'об', 'о', 'у',
+  'же', 'то', 'не', 'но', 'а', 'или', 'что', 'как', 'это', 'все', 'его', 'ее', 'их',
+  'the', 'a', 'an', 'of', 'for', 'and', 'or', 'to', 'in', 'on', 'with', 'by', 'is', 'are',
+])
+
+/**
+ * Совпадает ли слово с основой из словаря.
+ *
+ * Основы от трёх букв ищутся по началу слова: «руд» → «руда», «руды», «рудник».
+ * Более короткие (двухбуквенные сокращения) должны совпасть целиком, иначе
+ * они цепляли бы половину словаря.
+ */
+export function matchesStem(token: string, stem: string): boolean {
+  if (stem.length < 3) return token === stem
+  return token.startsWith(stem)
+}
+
+/** Есть ли в наборе слов хоть одно с такой основой. */
+export function hasStem(tokens: string[], stem: string): boolean {
+  return tokens.some(token => matchesStem(token, stem))
+}
+
+/**
+ * Признак может быть словом («сварк») или фразой («контроль качества»).
+ * Фразы ищем по нормализованному тексту целиком.
+ */
+export function hasSignal(normalizedText: string, tokens: string[], signal: string): boolean {
+  if (signal.includes(' ')) return normalizedText.includes(signal)
+  return hasStem(tokens, signal)
+}
+
+/**
+ * Мягкое сопоставление ДЛЯ ЗАПРОСА: совпадение в обе стороны.
+ *
+ * В словаре лежит основа «mining», пользователь пишет «mine» — слово короче
+ * основы, и обычная проверка «начинается с» его не поймает. Для запроса это
+ * допустимо: он короткий и осмысленный. В классификации проектов такое
+ * послабление не используется — там оно давало бы ложные срабатывания.
+ */
+export function hasQuerySignal(normalizedText: string, tokens: string[], signal: string): boolean {
+  if (signal.includes(' ')) return normalizedText.includes(signal)
+  return tokens.some(token => {
+    if (matchesStem(token, signal)) return true
+    return token.length >= 4 && signal.startsWith(token)
+  })
+}
+
+/** Расстояние Левенштейна с ранним выходом — для опечаток в запросе. */
+export function editDistance(a: string, b: string, max = 2): number {
+  if (a === b) return 0
+  if (Math.abs(a.length - b.length) > max) return max + 1
+
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i]
+    let rowMin = i
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+      if (curr[j] < rowMin) rowMin = curr[j]
+    }
+    if (rowMin > max) return max + 1
+    prev = curr
+  }
+  return prev[b.length]
+}
+
+/** Похожие слова: точное вхождение по началу либо опечатка в 1–2 буквы. */
+export function fuzzyMatches(token: string, queryToken: string): boolean {
+  if (token.startsWith(queryToken) || queryToken.startsWith(token)) return true
+  if (queryToken.length < 5) return false
+  return editDistance(token, queryToken, queryToken.length > 7 ? 2 : 1) <= (queryToken.length > 7 ? 2 : 1)
+}

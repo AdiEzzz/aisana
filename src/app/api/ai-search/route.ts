@@ -1,128 +1,125 @@
-import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
-import { generateMatchReasons, generateSearchSummary } from "@/lib/geminiSummary"
+import { NextRequest, NextResponse } from 'next/server'
+import { UserRole } from '@prisma/client'
+import { prisma } from '@/lib/prisma'
+import { requireApiRole } from '@/lib/auth'
+import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { loadSearchIndex } from '@/lib/search/store'
+import { searchIndex } from '@/lib/search/engine'
+import { generateMatchReasons, generateSearchSummary } from '@/lib/geminiSummary'
 
-const requestCounts = new Map<string, { count: number; reset: number }>()
+export const dynamic = 'force-dynamic'
 
-function isRateLimited(ip: string): boolean {
-  const now = Date.now()
-  const entry = requestCounts.get(ip)
-  if (!entry || now > entry.reset) {
-    requestCounts.set(ip, { count: 1, reset: now + 60_000 })
-    return false
-  }
-  entry.count++
-  return entry.count > 20
-}
-
+/**
+ * Смысловой поиск по проектам.
+ *
+ * Раньше здесь были два сырых SQL-запроса к полнотекстовому индексу и к
+ * pg_trgm — ни того, ни другого в базе никогда не создавалось, оба запроса
+ * молча падали в catch, и выдача формировалась одним грубым списком регулярок
+ * по категориям. Отсюда и пропуски: находились не релевантные проекты,
+ * а все проекты категории, на которую случайно сработала регулярка.
+ *
+ * Теперь ранжирование считает движок (src/lib/search): совпадение направлений
+ * запроса и проекта плюс лексическое совпадение по всем текстовым полям.
+ * Gemini используется только для человеческих формулировок поверх готовой
+ * выдачи — на состав и порядок результатов он больше не влияет.
+ */
 export async function POST(request: NextRequest) {
   try {
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
+    // Каждый запрос к Gemini тратит платную квоту, поэтому эндпоинт закрыт
+    const { response: authError } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR])
+    if (authError) return authError
 
-    if (isRateLimited(ip)) {
-      return NextResponse.json({ error: "Слишком много запросов, попробуйте через минуту" }, { status: 429 })
+    const ip = getClientIp(request)
+    if (!rateLimit(`ai-search:${ip}`, 30, 60_000).ok) {
+      return NextResponse.json(
+        { error: 'Слишком много запросов, попробуйте через минуту' },
+        { status: 429 }
+      )
     }
 
-    const body = await request.json()
-    const query = typeof body.query === "string" ? body.query : ""
+    const body = await request.json().catch(() => ({}))
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    const debug = body.debug === true
+    const limit = Math.min(Number(body.limit) || 50, 100)
 
-    if (!query || query.trim().length < 2) {
-      return NextResponse.json({ error: "Введите минимум 2 символа" }, { status: 400 })
+    if (query.length < 2) {
+      return NextResponse.json({ error: 'Введите минимум 2 символа' }, { status: 400 })
     }
 
-    const synonymMap: Array<{ pattern: RegExp; categories: string[] }> = [
-      { pattern: /нефтегаз|нефть|газ|углеводор|энергетик|энергетическ/iu, categories: ["ANALYTICS"] },
-      { pattern: /компьютерн(?:ое|ная)? зрени|зрение|медицин|здравоохран/iu, categories: ["COMPUTER_VISION"] },
-      { pattern: /чат-?бот|чатбот|чатботы|образован|школ|университ|курс|студент|экзамен|тест|проверк/iu, categories: ["EDUCATION", "GENERATIVE_AI"] },
-      { pattern: /машинн(?:ое|ые)? обучен|machine learning|ml|анализ данных|data science|наук|исследовани/iu, categories: ["SCIENCE", "ANALYTICS"] },
-      { pattern: /генеративн|llm|gpt|chatgpt|claude|gemini|генеративный/iu, categories: ["GENERATIVE_AI"] },
-      { pattern: /робототех|робот|автоматизац(?:ия|ион)|промышленн(?:ая|ые) автоматизац/iu, categories: ["ROBOTICS"] },
-      { pattern: /управлени|менеджмент|management|организац/iu, categories: ["MANAGEMENT"] },
-      { pattern: /наука|исследовани|исследовател/iu, categories: ["SCIENCE"] },
-    ]
+    const index = await loadSearchIndex(prisma)
+    const { query: parsed, hits } = searchIndex(index, query, { limit })
 
-    const triggers = new Set<string>()
-    const qLower = query.toLowerCase()
-    for (const m of synonymMap) if (m.pattern.test(qLower)) for (const c of m.categories) triggers.add(c)
+    if (hits.length === 0) {
+      return NextResponse.json({
+        query,
+        count: 0,
+        results: [],
+        aiSummary: '',
+        matchReasons: {},
+        topics: parsed.topics,
+        ...(debug ? { debug: { parsedQuery: parsed, note: 'Ни один проект не набрал минимальный балл' } } : {}),
+      })
+    }
 
-    const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000))
+    // Данные проектов подтягиваем одним запросом и возвращаем в порядке выдачи
+    const ids = hits.map(hit => hit.id)
+    const projects = await prisma.project.findMany({
+      where: { id: { in: ids } },
+      include: {
+        technologies: true,
+        university: { include: { region: true } },
+      },
+    })
+    const byId = new Map(projects.map(project => [project.id, project]))
 
-    const searchPromise = (async () => {
-      const search = query.trim()
-      if (search.length === 0) return []
-
-      let mainRows: Array<{ id: string; rank: number }> = []
-      try {
-        const ftsPromise = prisma.$queryRaw<Array<{ id: string; rank: number }>>`
-          SELECT p.id, ts_rank(p.search_vector, websearch_to_tsquery('russian', ${search})) AS rank
-          FROM projects p
-          WHERE p.search_vector @@ websearch_to_tsquery('russian', ${search})
-          ORDER BY rank DESC
-          LIMIT 50
-        `
-        mainRows = await Promise.race([ftsPromise, timeoutPromise]) as Array<{id:string,rank:number}>
-      } catch (e) {
-        console.error('FTS query error', e)
-        mainRows = []
-      }
-
-      let mainIds = mainRows.map(r => r.id)
-
-      if (mainIds.length === 0) {
-        try {
-          const simRows = await Promise.race([
-            prisma.$queryRaw<Array<{ id: string; sim: number }>>`
-              SELECT id, similarity(title, ${search}) AS sim
-              FROM projects
-              WHERE similarity(title, ${search}) > 0.25
-              ORDER BY sim DESC
-              LIMIT 50
-            `,
-            timeoutPromise,
-          ]) as Array<{id:string,sim:number}>
-          mainIds = simRows.map(r => r.id)
-        } catch (e) {
-          console.error('Similarity fallback error', e)
-          mainIds = []
+    const results = hits
+      .map(hit => {
+        const project = byId.get(hit.id)
+        if (!project) return null
+        return {
+          ...project,
+          searchScore: hit.score,
+          topics: hit.topics.map(topic => ({
+            topic: topic.topic,
+            label: topic.label,
+            score: topic.score,
+            explanation: topic.explanation,
+          })),
+          matchReason: hit.debug.reason,
+          ...(debug ? { debug: hit.debug } : {}),
         }
-      }
+      })
+      .filter(Boolean)
 
-      let catIds: string[] = []
-      if (triggers.size > 0) {
-        const cats = Array.from(triggers)
-        try {
-          const rows = await prisma.project.findMany({ where: { category: { in: cats as any } }, select: { id: true }, take: 50 })
-          catIds = rows.map(r => r.id)
-        } catch (e) {
-          console.error('Category lookup error', e)
-          catIds = []
-        }
-      }
+    // Честный счётчик попаданий: один адрес — один плюс проекту в час
+    const countable = ids.filter(id => rateLimit(`hit:${ip}:${id}`, 1, 60 * 60 * 1000).ok)
+    if (countable.length) {
+      await prisma.project.updateMany({
+        where: { id: { in: countable } },
+        data: { searchHitCount: { increment: 1 } },
+      }).catch(() => null)
+    }
 
-      const combined = Array.from(new Set([...mainIds, ...catIds])).slice(0,50)
-      if (combined.length === 0) return []
+    // Пояснения от модели — поверх уже готовой выдачи, необязательны
+    const [aiSummary, matchReasons] = await Promise.all([
+      generateSearchSummary(query, projects.map(p => ({ title: p.title, description: p.description }))),
+      generateMatchReasons(query, hits.slice(0, 30).map(hit => {
+        const project = byId.get(hit.id)!
+        return { id: hit.id, title: project.title, description: project.description }
+      })),
+    ])
 
-      const projects = await prisma.project.findMany({ where: { id: { in: combined } }, include: { technologies: true, university: { include: { region: true } } } })
-      const projectsById = new Map(projects.map((p) => [p.id, p]))
-      const ordered = combined.map((id) => projectsById.get(id)).filter(Boolean)
-      return ordered
-    })()
-
-    const projects = (await Promise.race([searchPromise, timeoutPromise])) as any[]
-    const aiSummary = await generateSearchSummary(query, projects.map((project) => ({
-      title: project.title,
-      description: project.description ?? null,
-    })))
-    const matchReasons = await generateMatchReasons(query, projects.map((project) => ({
-      id: project.id,
-      title: project.title,
-      description: project.description ?? null,
-    })))
-
-    return NextResponse.json({ query, count: projects.length, results: projects, aiSummary, matchReasons })
+    return NextResponse.json({
+      query,
+      count: results.length,
+      results,
+      aiSummary,
+      matchReasons,
+      topics: parsed.topics,
+      ...(debug ? { debug: { parsedQuery: parsed, indexSize: index.length } } : {}),
+    })
   } catch (error) {
-    console.error(error)
-    if (error instanceof Error && error.message === "timeout") return NextResponse.json({ error: "Поиск занял слишком много времени, попробуйте уточнить запрос" }, { status: 503 })
-    return NextResponse.json({ error: "Ошибка поиска" }, { status: 500 })
+    console.error('Search error:', error)
+    return NextResponse.json({ error: 'Ошибка поиска' }, { status: 500 })
   }
 }

@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic'
 
 import { prisma } from '@/lib/prisma'
+import { PUBLISHED_ONLY } from '@/lib/publication'
 import { cached } from '@/lib/data-cache'
 import { PageLayout } from '@/components/layout/PageLayout'
 import { DashboardCharts } from '@/components/charts/DashboardCharts'
@@ -17,35 +18,35 @@ async function getDashboardData() {
     teamAgg, bestPracticesCount, technologies, topViewed, topSearched,
   ] = await Promise.all([
     prisma.university.count(),
-    prisma.project.count(),
-    prisma.project.count({ where: { status: 'IMPLEMENTED' } }),
-    prisma.project.count({ where: { status: 'SCALED' } }),
-    prisma.project.count({ where: { status: { in: ['PROTOTYPE', 'PILOT'] } } }),
+    prisma.project.count({ where: PUBLISHED_ONLY }),
+    prisma.project.count({ where: { ...PUBLISHED_ONLY, status: 'IMPLEMENTED' } }),
+    prisma.project.count({ where: { ...PUBLISHED_ONLY, status: 'SCALED' } }),
+    prisma.project.count({ where: { ...PUBLISHED_ONLY, status: { in: ['PROTOTYPE', 'PILOT'] } } }),
     prisma.region.findMany({
-      include: { universities: { include: { _count: { select: { projects: true } } } } },
+      include: { universities: { include: { _count: { select: { projects: { where: PUBLISHED_ONLY } } } } } },
       orderBy: { name: 'asc' },
     }),
-    prisma.project.groupBy({ by: ['status'], _count: { id: true } }),
-    prisma.project.groupBy({ by: ['category'], _count: { id: true } }),
+    prisma.project.groupBy({ by: ['status'], _count: { id: true }, where: PUBLISHED_ONLY }),
+    prisma.project.groupBy({ by: ['category'], _count: { id: true }, where: PUBLISHED_ONLY }),
     prisma.university.findMany({
-      include: { _count: { select: { projects: true } } },
+      include: { _count: { select: { projects: { where: PUBLISHED_ONLY } } } },
       orderBy: { projects: { _count: 'desc' } },
     }),
-    prisma.project.aggregate({ _sum: { teamSize: true } }),
-    prisma.project.count({ where: { isBestPractice: true } }),
+    prisma.project.aggregate({ _sum: { teamSize: true }, where: PUBLISHED_ONLY }),
+    prisma.project.count({ where: { ...PUBLISHED_ONLY, isBestPractice: true } }),
     prisma.technology.findMany({
-      include: { _count: { select: { projects: true } } },
+      include: { _count: { select: { projects: { where: PUBLISHED_ONLY } } } },
       orderBy: { projects: { _count: 'desc' } },
       take: 8,
     }),
     prisma.project.findMany({
-      where: { viewCount: { gt: 0 } },
+      where: { ...PUBLISHED_ONLY, viewCount: { gt: 0 } },
       orderBy: { viewCount: 'desc' },
       take: 5,
       select: { id: true, title: true, viewCount: true },
     }),
     prisma.project.findMany({
-      where: { searchHitCount: { gt: 0 } },
+      where: { ...PUBLISHED_ONLY, searchHitCount: { gt: 0 } },
       orderBy: { searchHitCount: 'desc' },
       take: 5,
       select: { id: true, title: true, searchHitCount: true },

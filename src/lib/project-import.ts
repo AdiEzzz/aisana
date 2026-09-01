@@ -1,7 +1,8 @@
 import * as XLSX from 'xlsx'
-import { PrismaClient, ProjectCategory, ProjectFileType, ProjectStatus, UserRole } from '@prisma/client'
+import { PrismaClient, ProjectCategory, ProjectFileType, ProjectStatus, PublicationStatus, UserRole } from '@prisma/client'
 import type { AuthUser } from '@/lib/auth'
 import { canAccessUniversity } from '@/lib/auth'
+import { canModerate } from '@/lib/publication'
 
 type RawRow = Record<string, unknown>
 
@@ -167,7 +168,13 @@ function isEmptyRow(row: RawRow) {
 }
 
 export function parseProjectWorkbook(buffer: Buffer) {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+  // CSV: срезаем UTF-8 BOM (иначе он приклеивается к первому заголовку)
+  // и читаем в UTF-8 (codepage 65001). Без этого кириллические заголовки
+  // CSV без BOM декодировались неверно и все строки молча пропускались.
+  const clean = buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
+    ? buffer.subarray(3)
+    : buffer
+  const workbook = XLSX.read(clean, { type: 'buffer', cellDates: true, codepage: 65001 })
   const firstSheetName = workbook.SheetNames[0]
   if (!firstSheetName) return []
 
@@ -183,6 +190,10 @@ export async function importProjectsFromRows(
   user: AuthUser,
   dryRun: boolean,
 ): Promise<ProjectImportSummary> {
+  // Модератор (админ/редактор) публикует импортированное сразу,
+  // представитель вуза — только после проверки
+  const importerCanPublish = canModerate(user)
+
   const summary: ProjectImportSummary = {
     dryRun,
     totalRows: rows.length,
@@ -385,6 +396,10 @@ export async function importProjectsFromRows(
       const project = await prisma.project.create({
         data: {
           ...data,
+          // Импорт от представителя вуза попадает в черновики — как и ручное
+          // добавление: на портал проект выходит после проверки модератором
+          publication: importerCanPublish ? PublicationStatus.PUBLISHED : PublicationStatus.DRAFT,
+          publishedAt: importerCanPublish ? new Date() : null,
           technologies: technologyIds.length ? { connect: technologyIds } : undefined,
         },
         select: { id: true },

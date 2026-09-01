@@ -31,7 +31,7 @@ async function main() {
   // ── Regions ───────────────────────────────────────────────
   const regionsData = [
     { name: 'Астана',                          nameKz: 'Астана',                        code: 'AST', center: '51.1801,71.4460' },
-    { name: 'Алматы (город)',                  nameKz: 'Алматы',                        code: 'ALA', center: '43.2220,76.8512' },
+    { name: 'Алматы',                          nameKz: 'Алматы',                        code: 'ALA', center: '43.2220,76.8512' },
     { name: 'Алматинская область',             nameKz: 'Алматы облысы',                 code: 'ALM', center: '44.0000,77.0000' },
     { name: 'Акмолинская область',             nameKz: 'Ақмола облысы',                 code: 'AKM', center: '51.7167,69.3833' },
     { name: 'Актюбинская область',             nameKz: 'Ақтөбе облысы',                 code: 'AKT', center: '50.2839,57.1669' },

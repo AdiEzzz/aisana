@@ -8,8 +8,7 @@ import {
   Settings,
   Upload,
   Users,
-  ScrollText,
-} from 'lucide-react'
+  ScrollText, MessageSquare } from 'lucide-react'
 import { UserRole } from '@prisma/client'
 import { LogoutButton } from '@/components/auth/LogoutButton'
 import { canManageAllContent, canManageUsers, requireUser } from '@/lib/auth'
@@ -30,6 +29,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: '/admin/projects', label: 'Проекты', icon: FolderKanban, show: user.role !== UserRole.VIEWER },
     { href: '/admin/import', label: 'Импорт', icon: Upload, show: user.role !== UserRole.VIEWER },
     { href: '/admin/hearings', label: 'Заслушивания', icon: Mic, show: canManageAllContent(user) },
+    { href: '/admin/feedback', label: 'Обращения', icon: MessageSquare, show: canManageAllContent(user) },
     { href: '/admin/users', label: 'Пользователи', icon: Users, show: canManageUsers(user) },
     { href: '/admin/audit', label: 'Журнал действий', icon: ScrollText, show: user.role === UserRole.ADMIN },
   ].filter(link => link.show)

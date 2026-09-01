@@ -1,10 +1,12 @@
 export const dynamic = 'force-dynamic'
 
-import { UserRole } from '@prisma/client'
+import { PublicationStatus, UserRole } from '@prisma/client'
 import Link from 'next/link'
-import { ArrowRight, Building2, FolderKanban, Mic, Plus } from 'lucide-react'
+import { ArrowRight, Building2, ClipboardCheck, FolderKanban, Mic, Plus } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { canManageAllContent, requireUser } from '@/lib/auth'
+import { canModerate } from '@/lib/publication'
+import { ReindexButton } from '@/components/admin/ReindexButton'
 import { formatDate } from '@/lib/utils'
 
 export default async function AdminPage() {
@@ -16,10 +18,12 @@ export default async function AdminPage() {
     ? { project: { universityId: user.universityId || '__none__' } }
     : {}
 
-  const [universities, projects, hearings] = await Promise.all([
+  const [universities, projects, hearings, awaitingReview] = await Promise.all([
     canManageAllContent(user) ? prisma.university.count() : Promise.resolve(user.universityId ? 1 : 0),
     prisma.project.count({ where: projectWhere }),
     prisma.hearing.count({ where: hearingWhere }),
+    // Очередь модерации: сколько проектов ждёт проверки
+    prisma.project.count({ where: { ...projectWhere, publication: PublicationStatus.REVIEW } }),
   ])
 
   const recentProjects = await prisma.project.findMany({
@@ -53,7 +57,29 @@ export default async function AdminPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-bold text-slate-800 mb-6">Обзор</h1>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-bold text-slate-800">Обзор</h1>
+        {canModerate(user) && <ReindexButton />}
+      </div>
+
+      {canModerate(user) && awaitingReview > 0 && (
+        <Link href="/admin/projects?publication=REVIEW">
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 transition-colors hover:bg-amber-100">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+              <ClipboardCheck size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-amber-900">
+                Ждут проверки: {awaitingReview}
+              </p>
+              <p className="text-xs text-amber-700">
+                Проекты вузов не появятся на портале, пока вы их не опубликуете
+              </p>
+            </div>
+            <ArrowRight size={16} className="ml-auto shrink-0 text-amber-600" />
+          </div>
+        </Link>
+      )}
 
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[

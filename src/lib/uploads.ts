@@ -1,5 +1,4 @@
 import { del } from '@vercel/blob'
-import { unlink } from 'fs/promises'
 import path from 'path'
 
 /**
@@ -19,43 +18,29 @@ export const BLOB_STORE_ID = process.env.BLOB_READ_WRITE_TOKEN_STORE_ID
  */
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 
-/** Публичные ссылки Blob всегда живут на этом домене. */
-const BLOB_HOST = '.blob.vercel-storage.com'
+/** Каталог внутри Blob-хранилища, куда складываются загруженные PDF. */
+export const BLOB_PREFIX = 'uploads'
 
 /**
- * Удаляет ранее загруженный файл.
+ * Удаляет ранее загруженный файл из Blob-хранилища.
  *
- * Понимает две формы: ссылку на Vercel Blob (текущее хранилище) и старый
- * локальный путь /uploads/xxx.pdf — такие записи остались в базе от версии,
- * которая писала файлы на диск. Внешние ссылки (Google Drive и прочее)
- * не трогает: ими мы не владеем.
+ * Реагирует только на наши собственные ссылки вида /uploads/xxx.pdf.
+ * Внешние (Google Диск и прочее) не трогает: ими мы не владеем.
  *
  * Ошибки не выбрасывает: отсутствие файла не должно ломать API-ответ.
+ * Записи, оставшиеся от версии, которая писала файлы на диск, в хранилище
+ * не найдутся — это ожидаемо и просто попадёт в лог.
  */
 export async function deleteUpload(url: string | null | undefined): Promise<void> {
-  if (!url) return
-
-  if (url.includes(BLOB_HOST)) {
-    try {
-      await del(url, { storeId: BLOB_STORE_ID })
-    } catch (error) {
-      console.error(`Failed to delete blob ${url}:`, error)
-    }
-    return
-  }
-
-  if (!url.startsWith('/uploads/')) return
+  if (!url || !url.startsWith('/uploads/')) return
 
   // path.basename защищает от path traversal (../../etc/passwd не пройдёт).
   const filename = path.basename(url)
   if (!filename) return
 
-  const filepath = path.join(process.cwd(), 'public', 'uploads', filename)
   try {
-    await unlink(filepath)
-  } catch (error: any) {
-    if (error?.code !== 'ENOENT') {
-      console.error(`Failed to delete upload ${filepath}:`, error)
-    }
+    await del(`${BLOB_PREFIX}/${filename}`, { storeId: BLOB_STORE_ID })
+  } catch (error) {
+    console.error(`Failed to delete upload ${filename}:`, error)
   }
 }

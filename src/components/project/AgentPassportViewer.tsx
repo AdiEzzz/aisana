@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { FileText, Upload, Trash2, ExternalLink, Maximize2, X, Link2, Loader2 } from 'lucide-react'
+import { toEmbedUrl } from '@/lib/embed'
 
 interface Props {
   projectId: string
@@ -93,7 +94,7 @@ export function AgentPassportViewer({ projectId, initialUrl, canEdit = false }: 
             </button>
           </div>
         </div>
-        <iframe src={`${url}#toolbar=1&navpanes=0`} className="flex-1 w-full" title="Паспорт агента" />
+        <iframe src={toEmbedUrl(url, '#toolbar=1&navpanes=0')} className="flex-1 w-full" title="Паспорт агента" />
       </div>
     )
   }
@@ -219,7 +220,7 @@ export function AgentPassportViewer({ projectId, initialUrl, canEdit = false }: 
 
       <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50" style={{ height: '75vh' }}>
         <iframe
-          src={`${url}#toolbar=1&navpanes=0&scrollbar=1`}
+          src={toEmbedUrl(url, '#toolbar=1&navpanes=0&scrollbar=1')}
           className="w-full h-full"
           title="Паспорт агента"
           loading="lazy"

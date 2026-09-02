@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
-import path from 'path'
+import { put } from '@vercel/blob'
 import { requireApiRole } from '@/lib/auth'
 import { UserRole } from '@prisma/client'
+import { BLOB_STORE_ID, MAX_UPLOAD_BYTES } from '@/lib/uploads'
 
-// Simple local file upload — stores PDFs under public/uploads
-// For production with multiple replicas, swap this for S3 / Vercel Blob / etc.
+// PDF складываются в Vercel Blob и отдаются по постоянной публичной ссылке.
+// Раньше файлы писались в public/uploads, но на Vercel файловая система
+// доступна только на чтение — запись падала с EROFS, и загрузка не работала.
 export async function POST(request: NextRequest) {
   try {
     const { response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP])
@@ -22,9 +23,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Поддерживаются только PDF файлы' }, { status: 400 })
     }
 
-    const maxSize = 20 * 1024 * 1024 // 20MB
-    if (file.size > maxSize) {
-      return NextResponse.json({ error: 'Файл больше 20MB' }, { status: 400 })
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const limitMb = Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)
+      return NextResponse.json({ error: `Файл больше ${limitMb}MB` }, { status: 400 })
     }
 
     const bytes = await file.arrayBuffer()
@@ -39,9 +40,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-    await mkdir(uploadDir, { recursive: true })
-
     // Sanitize filename: strip path separators, keep only safe chars, cap length
     const ext = '.pdf'
     const baseName = file.name
@@ -51,12 +49,17 @@ export async function POST(request: NextRequest) {
       .slice(0, 60)
     const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const filename = `${uniqueId}-${baseName || 'document'}${ext}`
-    const filepath = path.join(uploadDir, filename)
 
-    await writeFile(filepath, buffer)
+    // access: 'public' — ссылку открывает <iframe> на странице проекта,
+    // подписанные ссылки для приватных файлов живут час и для этого не годятся.
+    const blob = await put(`uploads/${filename}`, buffer, {
+      access: 'public',
+      contentType: 'application/pdf',
+      addRandomSuffix: false,
+      storeId: BLOB_STORE_ID,
+    })
 
-    const url = `/uploads/${filename}`
-    return NextResponse.json({ url })
+    return NextResponse.json({ url: blob.url })
   } catch (error: any) {
     console.error('Upload error:', error)
     return NextResponse.json({ error: 'Ошибка загрузки файла' }, { status: 500 })

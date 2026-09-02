@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
-import { deleteLocalUpload } from '@/lib/uploads'
+import { deleteUpload } from '@/lib/uploads'
 import { invalidateSearchIndex, reclassifyProject } from '@/lib/search/store'
 import { audit } from '@/lib/audit'
 
@@ -102,9 +102,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     // Чистим локально загруженные файлы проекта с диска,
     // чтобы они не оставались сиротами в volume загрузок
-    await deleteLocalUpload(existing.agentPassportPdf)
+    await deleteUpload(existing.agentPassportPdf)
     for (const file of existing.files) {
-      await deleteLocalUpload(file.url)
+      await deleteUpload(file.url)
     }
 
     invalidateSearchIndex()

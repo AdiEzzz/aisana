@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
-import { deleteLocalUpload } from '@/lib/uploads'
+import { deleteUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
 import { ProjectFileType, UserRole } from '@prisma/client'
 
@@ -95,7 +95,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await prisma.projectFile.delete({ where: { id: fileId } })
 
     // Если файл был загружен локально (/uploads/...) — удаляем и с диска
-    await deleteLocalUpload(file.url)
+    await deleteUpload(file.url)
 
     await audit(user, 'DELETE', 'project_file', fileId, file.label)
 

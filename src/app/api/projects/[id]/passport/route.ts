@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
-import { deleteLocalUpload } from '@/lib/uploads'
+import { deleteUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
 import { UserRole } from '@prisma/client'
 
@@ -50,7 +50,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     // Старый локальный PDF больше не нужен — удаляем с диска, чтобы
     // volume с загрузками не рос бесконечно при каждой замене.
     if (existing.agentPassportPdf && existing.agentPassportPdf !== (url || null)) {
-      await deleteLocalUpload(existing.agentPassportPdf)
+      await deleteUpload(existing.agentPassportPdf)
     }
 
     await audit(user, 'UPDATE', 'passport', id, url ? 'установлен' : 'очищен')
@@ -83,7 +83,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     })
 
     // Чистим файл с диска, чтобы не копить сироты в volume загрузок
-    await deleteLocalUpload(existing.agentPassportPdf)
+    await deleteUpload(existing.agentPassportPdf)
 
     await audit(user, 'DELETE', 'passport', id)
     revalidatePath(`/projects/${id}`)

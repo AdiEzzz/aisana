@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireApiRole } from '@/lib/auth'
-import { deleteLocalUpload } from '@/lib/uploads'
+import { deleteUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -66,8 +66,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await prisma.university.delete({ where: { id } })
 
     for (const p of projects) {
-      await deleteLocalUpload(p.agentPassportPdf)
-      for (const f of p.files) await deleteLocalUpload(f.url)
+      await deleteUpload(p.agentPassportPdf)
+      for (const f of p.files) await deleteUpload(f.url)
     }
 
     await audit(user, 'DELETE', 'university', id)

@@ -25,8 +25,11 @@ const tagsList = z
 /** Идентификаторы технологий. */
 const technologyIds = z.array(z.string().min(1).max(64)).max(100).optional()
 
+// Формат почты при входе не проверяем: учётки заводились без проверки
+// формата, и строгий .email() (требует домен верхнего уровня) закрыл бы
+// вход тем, у кого адрес вида user@host. Вход — это просто поиск по базе.
 export const loginSchema = z.object({
-  email: z.string().trim().email().max(255),
+  email: z.string().trim().min(1).max(255),
   password: z.string().min(1).max(200),
 })
 
@@ -162,9 +165,10 @@ function issueMessage(issue: z.ZodIssue): string {
     case 'invalid_enum_value':
       return `допустимые значения: ${issue.options.join(', ')}`
     case 'too_small':
-      return issue.type === 'string' && issue.minimum === 1
-        ? 'значение не может быть пустым'
-        : `минимум ${issue.minimum}`
+      if (issue.type === 'string') {
+        return issue.minimum === 1 ? 'значение не может быть пустым' : `минимум ${issue.minimum} символов`
+      }
+      return `минимум ${issue.minimum}`
     case 'too_big':
       if (issue.type === 'string') return `максимум ${issue.maximum} символов`
       if (issue.type === 'array') return `максимум ${issue.maximum} элементов`

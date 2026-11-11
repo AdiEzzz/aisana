@@ -6,6 +6,7 @@ import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { loadSearchIndex } from '@/lib/search/store'
 import { searchIndex } from '@/lib/search/engine'
 import { generateMatchReasons, generateSearchSummary } from '@/lib/geminiSummary'
+import { getLlmCacheStats } from '@/lib/llm-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,21 +101,29 @@ export async function POST(request: NextRequest) {
       }).catch(() => null)
     }
 
-    // Пояснения от модели — поверх уже готовой выдачи, необязательны
-    const [aiSummary, matchReasons] = await Promise.all([
+    // Пояснения от модели — поверх уже готовой выдачи, необязательны.
+    // Проект мог быть удалён между сборкой индекса и запросом — тогда
+    // его нет в byId, и он просто не попадает в пояснения.
+    const [summary, reasons] = await Promise.all([
       generateSearchSummary(query, projects.map(p => ({ title: p.title, description: p.description }))),
-      generateMatchReasons(query, hits.slice(0, 30).map(hit => {
-        const project = byId.get(hit.id)!
-        return { id: hit.id, title: project.title, description: project.description }
+      generateMatchReasons(query, hits.slice(0, 30).flatMap(hit => {
+        const project = byId.get(hit.id)
+        return project ? [{ id: hit.id, title: project.title, description: project.description }] : []
       })),
     ])
+
+    // Эффективность кэша — в лог сервера, а не в ответ: клиенту она
+    // ничего не даёт, а лишние поля в JSON — лишняя утечка деталей.
+    console.info('LLM cache', getLlmCacheStats())
 
     return NextResponse.json({
       query,
       count: results.length,
       results,
-      aiSummary,
-      matchReasons,
+      aiSummary: summary.data,
+      matchReasons: reasons.data,
+      // Пользователь должен видеть, что ИИ-часть недоступна, а не пустоту
+      aiAvailable: summary.available && reasons.available,
       topics: parsed.topics,
       ...(debug ? { debug: { parsedQuery: parsed, indexSize: index.length } } : {}),
     })

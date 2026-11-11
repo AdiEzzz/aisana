@@ -16,7 +16,7 @@
 
 import { classifyProject, type ClassifiableProject, type TopicMatch } from './classify'
 import { parseQuery, type ParsedQuery } from './query'
-import { fuzzyMatches, normalize, tokenize } from './text'
+import { fuzzyMatches, hasAllWords, normalize, tokenize } from './text'
 import type { TopicId } from './taxonomy'
 
 /** Поля, по которым идёт лексический поиск, и их вклад в оценку. */
@@ -68,8 +68,14 @@ export interface IndexedProject {
 
 export interface SearchHit {
   id: string
-  /** Итоговая оценка 0–100 */
+  /** Итоговая оценка 0–100 (может срезаться потолком — для показа) */
   score: number
+  /**
+   * Необработанная сумма сигналов. Именно по ней сортируется выдача:
+   * score срезан 100, и при срезе несколько проектов выглядят одинаково,
+   * а их реальный порядок по релевантности известен только здесь.
+   */
+  rank: number
   topics: TopicMatch[]
   debug: {
     /** Вклад смыслового сигнала */
@@ -182,10 +188,19 @@ function scoreProject(indexed: IndexedProject, query: ParsedQuery): SearchHit | 
     }
   }
 
-  // Точная фраза запроса в названии или описании — сильный сигнал
+  // Точная фраза запроса в названии или описании — сильный сигнал.
+  // Фразу собираем из значимых слов запроса: со стоп-словами («на», «для»)
+  // она в тексте не встречается никогда и бонус не срабатывал.
+  // Порядок слов не важен: «контроль качества» должно засчитываться и когда
+  // в тексте «качество контроля».
+  //
+  // Расширение запроса признаками направлений (query.expanded) намеренно
+  // НЕ применяется: смысловой сигнал выше уже находит проект по запросу
+  // «производство» → «сварка», а перебор расширенных слов по всем полям
+  // замедлял поиск в 20 раз (21 мс → 544 мс на 1000 проектов).
   if (query.tokens.length > 1) {
-    if (indexed.fields.title.text.includes(query.text)) lexicalPoints += 8
-    else if (indexed.fields.description.text.includes(query.text)) lexicalPoints += 4
+    if (hasAllWords(indexed.fields.title.text, query.tokens)) lexicalPoints += 8
+    else if (hasAllWords(indexed.fields.description.text, query.tokens)) lexicalPoints += 4
   }
 
   const coverage = query.tokens.length ? foundQueryTokens.size / query.tokens.length : 0
@@ -195,11 +210,15 @@ function scoreProject(indexed: IndexedProject, query: ParsedQuery): SearchHit | 
   if (coverage === 1 && query.tokens.length > 1) lexicalPoints *= 1.25
 
   const rawScore = topicPoints + lexicalPoints
-  if (rawScore < 3) return null
+  // Порог отсекает шум, но не должен убивать совпадения по «лёгким» полям
+  // (регион, вуз, руководитель): их вклад 0.4–0.6, а порог был 3.
+  if (rawScore < 0.4) return null
 
-  // Лучшие практики чуть выше при прочих равных
-  const bonus = indexed.isBestPractice ? 1.03 : 1
-  const score = Math.min(100, Math.round(rawScore * bonus))
+  // Лучшие практики чуть выше при прочих равных. Бонус применяем к
+  // необработанному баллу, а не к округлённому: при 99 он давал +3
+  // и превращал честное 99 в 100 — ложную ничью с настоящим 100.
+  const rank = rawScore * (indexed.isBestPractice ? 1.03 : 1)
+  const score = Math.min(100, Math.round(rank))
 
   const fieldsDebug = [...matchedFields.entries()]
     .map(([field, entry]) => ({
@@ -213,6 +232,7 @@ function scoreProject(indexed: IndexedProject, query: ParsedQuery): SearchHit | 
   return {
     id: indexed.id,
     score,
+    rank,
     topics: indexed.topics,
     debug: {
       topicPoints: Math.round(topicPoints * 10) / 10,
@@ -264,7 +284,9 @@ export function searchIndex(
   const hits = index
     .map(item => scoreProject(item, query))
     .filter((hit): hit is SearchHit => hit !== null && hit.score >= minScore)
-    .sort((a, b) => b.score - a.score)
+    // Сортируем по необработанному баллу: score срезан 100, и при срезе
+    // порядок «новые выше» не отражает релевантность.
+    .sort((a, b) => b.rank - a.rank)
     .slice(0, limit)
 
   return { query, hits }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireApiRole } from '@/lib/auth'
+import { requireApiRole, requireApiUser } from '@/lib/auth'
+import { visibleProjectsWhere } from '@/lib/publication'
 import { audit } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
@@ -35,9 +36,16 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // Настоящая проверка сессии: middleware смотрит только наличие cookie
+    const { user, response } = await requireApiUser(request)
+    if (response) return response
+
+    // Слушания черновиков посторонним не показываем: модераторы видят всё,
+    // представитель вуза — проекты своего вуза, остальные — только опубликованные
     const hearings = await prisma.hearing.findMany({
+      where: { project: visibleProjectsWhere(user) },
       include: { project: { include: { university: true } } },
       orderBy: { date: 'desc' },
     })

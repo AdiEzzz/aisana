@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { PUBLISHED_ONLY, canModerate } from '@/lib/publication'
 import { invalidateSearchIndex, loadSearchIndex, reclassifyProject } from '@/lib/search/store'
 import { searchIndex } from '@/lib/search/engine'
-import { canAccessUniversity, requireApiRole } from '@/lib/auth'
+import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
 import { audit } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
@@ -73,6 +73,10 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    // Настоящая проверка сессии: middleware смотрит только наличие cookie
+    const { response } = await requireApiUser(request)
+    if (response) return response
+
     const { searchParams } = new URL(request.url)
     const q = searchParams.get('q')
     const status = searchParams.get('status')

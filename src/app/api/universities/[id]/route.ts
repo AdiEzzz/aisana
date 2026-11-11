@@ -1,16 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireApiRole } from '@/lib/auth'
+import { PUBLISHED_PROJECTS_RELATION } from '@/lib/publication'
+import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
 import { deleteUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Настоящая проверка сессии: middleware смотрит только наличие cookie
+    const { user, response } = await requireApiUser(request)
+    if (response) return response
+
     const { id } = await params
+    // Черновики видны модераторам и представителю СВОЕГО вуза
+    const canSeeDrafts = canAccessUniversity(user, id)
+
     const university = await prisma.university.findUnique({
       where: { id },
-      include: { region: true, projects: { include: { technologies: true } } },
+      include: {
+        region: true,
+        projects: {
+          include: { technologies: true },
+          where: canSeeDrafts ? undefined : PUBLISHED_PROJECTS_RELATION.where,
+        },
+      },
     })
     if (!university) return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
     return NextResponse.json(university)

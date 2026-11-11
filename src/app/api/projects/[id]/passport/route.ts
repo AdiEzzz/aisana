@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { deleteUpload } from '@/lib/uploads'
+import { isAllowedFileUrl } from '@/lib/file-url'
 import { audit } from '@/lib/audit'
 import { UserRole } from '@prisma/client'
 
@@ -34,7 +35,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const { url } = await request.json()
 
     // Basic sanity check on the URL to avoid storing garbage / javascript: links
-    if (url && !/^https?:\/\//i.test(url) && !url.startsWith('/uploads/')) {
+    if (url && !isAllowedFileUrl(url)) {
       return NextResponse.json(
         { error: 'Ссылка должна начинаться с http(s):// или быть загруженным файлом (/uploads/)' },
         { status: 400 }
@@ -49,8 +50,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     // Старый локальный PDF больше не нужен — удаляем с диска, чтобы
     // volume с загрузками не рос бесконечно при каждой замене.
+    // Если тот же файл привязан к другому проекту, он останется на диске.
     if (existing.agentPassportPdf && existing.agentPassportPdf !== (url || null)) {
-      await deleteUpload(existing.agentPassportPdf)
+      await deleteUpload(existing.agentPassportPdf, { exceptProjectId: id })
     }
 
     await audit(user, 'UPDATE', 'passport', id, url ? 'установлен' : 'очищен')

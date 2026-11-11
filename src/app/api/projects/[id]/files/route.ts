@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { deleteUpload } from '@/lib/uploads'
+import { isAllowedFileUrl } from '@/lib/file-url'
 import { audit } from '@/lib/audit'
 import { ProjectFileType, UserRole } from '@prisma/client'
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Та же проверка, что и у паспорта проекта: url рендерится как <a href>
     // на публичной странице, поэтому javascript:-ссылки и прочий мусор
     // не должны попадать в базу.
-    if (!/^https?:\/\//i.test(data.url) && !String(data.url).startsWith('/uploads/')) {
+    if (!isAllowedFileUrl(data.url)) {
       return NextResponse.json(
         { error: 'Ссылка должна начинаться с http(s):// или быть загруженным файлом (/uploads/)' },
         { status: 400 }
@@ -94,8 +95,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     await prisma.projectFile.delete({ where: { id: fileId } })
 
-    // Если файл был загружен локально (/uploads/...) — удаляем и с диска
-    await deleteUpload(file.url)
+    // Если файл был загружен локально (/uploads/...) — удаляем и с диска.
+    // Если тот же файл привязан к другому проекту, он останется на диске.
+    await deleteUpload(file.url, { exceptProjectId: id })
 
     await audit(user, 'DELETE', 'project_file', fileId, file.label)
 

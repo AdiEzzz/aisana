@@ -6,8 +6,7 @@ import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { canModerate } from '@/lib/publication'
 import { invalidateSearchIndex } from '@/lib/search/store'
 import { audit } from '@/lib/audit'
-
-const ALLOWED = new Set<string>(Object.values(PublicationStatus))
+import { parseBody, publicationSchema } from '@/lib/schemas'
 
 /**
  * Смена статуса публикации проекта.
@@ -33,10 +32,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     const body = await request.json().catch(() => ({}))
-    const next = String(body.publication || '')
-    if (!ALLOWED.has(next)) {
-      return NextResponse.json({ error: 'Неизвестный статус публикации' }, { status: 400 })
+    const parsed = parseBody(publicationSchema, body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
+    const next = parsed.data.publication
 
     // Публиковать и снимать с публикации может только модератор
     const moderator = canModerate(user)

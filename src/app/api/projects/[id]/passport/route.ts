@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { canAccessUniversity, requireApiRole } from '@/lib/auth'
 import { deleteUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
+import { parseBody, passportSchema } from '@/lib/schemas'
 import { UserRole } from '@prisma/client'
 
 export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -31,7 +32,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Недостаточно прав для этого проекта' }, { status: 403 })
     }
 
-    const { url } = await request.json()
+    const body = await request.json().catch(() => ({}))
+    const parsed = parseBody(passportSchema, body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
+    }
+    const { url } = parsed.data
 
     // Basic sanity check on the URL to avoid storing garbage / javascript: links
     if (url && !/^https?:\/\//i.test(url) && !url.startsWith('/uploads/')) {

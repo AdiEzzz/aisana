@@ -27,6 +27,9 @@ services:
     container_name: ai_map_kz_migrate
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/ai_map_kz
+      # Пароль создаваемого админа; без него сид сгенерирует случайный
+      # и напечатает его в лог.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy

@@ -35,6 +35,7 @@ cp .env.example .env
 POSTGRES_PASSWORD=<надёжный-пароль>
 DATABASE_URL="postgresql://postgres:<надёжный-пароль>@localhost:5432/ai_map_kz"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+ADMIN_PASSWORD=<пароль админа, которого создаёт сид>
 GEMINI_API_KEY=<ключ из https://aistudio.google.com/app/apikey>
 ```
 
@@ -61,8 +62,13 @@ npm run dev
 
 Откройте [http://localhost:3000](http://localhost:3000)
 
-Вход в админку: `/login` → после сида `admin@mnvo.kz / admin123`
-(**смените пароль после первого входа**).
+Вход в админку: `/login` → после сида `admin@mnvo.kz` и пароль из `ADMIN_PASSWORD`.
+Если переменная `ADMIN_PASSWORD` не задана, сид сгенерирует случайный пароль
+и напечатает его в логе сервиса `migrate`:
+
+```bash
+docker compose logs migrate | grep -A 2 "Admin created"
+```
 
 ---
 
@@ -209,3 +215,5 @@ npm run db:studio    # Prisma Studio
   на Vercel нужен внешний сторедж (S3/Blob). Переменные: `DATABASE_URL`,
   `GEMINI_API_KEY`, `NEXT_PUBLIC_APP_URL`.
 - `NEXT_PUBLIC_APP_URL` укажите реальным доменом — используется в sitemap и OpenGraph.
+- `ADMIN_PASSWORD` — пароль админа, создаваемого сидом. Без него сид генерирует
+  случайный пароль и печатает его в лог сервиса `migrate`.

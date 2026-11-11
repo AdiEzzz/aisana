@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { requireApiRole } from '@/lib/auth'
 import { audit } from '@/lib/audit'
 import { parseUniversityWorkbook, importUniversitiesFromRows } from '@/lib/university-import'
+import { checkImportRows, checkImportSize } from '@/lib/import-limits'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,11 +22,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Файл не передан' }, { status: 400 })
     }
 
+    // Проверяем размер ДО чтения в память: arrayBuffer() съедает весь файл
+    const sizeError = checkImportSize(file.size)
+    if (sizeError) {
+      return NextResponse.json({ error: sizeError }, { status: 400 })
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer())
     const rows = parseUniversityWorkbook(buffer)
 
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Файл пустой или не читается' }, { status: 400 })
+    }
+
+    // Большой импорт упирается в память и транзакции БД
+    const rowsError = checkImportRows(rows.length)
+    if (rowsError) {
+      return NextResponse.json({ error: rowsError }, { status: 400 })
     }
 
     const summary = await importUniversitiesFromRows(prisma, rows, dryRun)

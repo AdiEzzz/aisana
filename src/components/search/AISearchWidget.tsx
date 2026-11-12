@@ -5,6 +5,7 @@ import { Search, Sparkles, Building2, ArrowRight, Loader2, AlertCircle, X } from
 import Link from 'next/link'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { CategoryBadge } from '@/components/ui/category-badge'
+import { useLang } from '@/context/LangContext'
 
 const EXAMPLES = [
   'Проекты в области нефтегазовой и энергетической отрасли',
@@ -33,6 +34,7 @@ interface StoredState {
   results: AIResult[] | null
   aiSummary: string | null
   matchReasons: Record<string, string>
+  aiAvailable: boolean
 }
 
 function loadStoredState(): StoredState | null {
@@ -52,11 +54,13 @@ function saveStoredState(state: StoredState) {
 }
 
 export function AISearchWidget() {
+  const { t } = useLang()
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<AIResult[] | null>(null)
   const [aiSummary, setAiSummary] = useState<string | null>(null)
   const [matchReasons, setMatchReasons] = useState<Record<string, string>>({})
+  const [aiAvailable, setAiAvailable] = useState(true)
   const [error, setError] = useState('')
   const [searched, setSearched] = useState('')
   const [hydrated, setHydrated] = useState(false)
@@ -69,14 +73,15 @@ export function AISearchWidget() {
       setResults(stored.results)
       setAiSummary(stored.aiSummary)
       setMatchReasons(stored.matchReasons || {})
+      setAiAvailable(stored.aiAvailable !== false)
     }
     setHydrated(true)
   }, [])
 
   useEffect(() => {
     if (!hydrated) return
-    saveStoredState({ query, searched, results, aiSummary, matchReasons })
-  }, [query, searched, results, aiSummary, matchReasons, hydrated])
+    saveStoredState({ query, searched, results, aiSummary, matchReasons, aiAvailable })
+  }, [query, searched, results, aiSummary, matchReasons, aiAvailable, hydrated])
 
   async function doSearch(q?: string) {
     const searchQuery = q || query
@@ -86,6 +91,7 @@ export function AISearchWidget() {
     setResults(null)
     setAiSummary(null)
     setMatchReasons({})
+    setAiAvailable(true)
     setSearched(searchQuery)
     try {
       const res = await fetch('/api/ai-search', {
@@ -98,6 +104,7 @@ export function AISearchWidget() {
       setResults(data.results)
       setAiSummary(data.aiSummary || null)
       setMatchReasons(data.matchReasons || {})
+      setAiAvailable(data.aiAvailable !== false)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -109,6 +116,7 @@ export function AISearchWidget() {
     setResults(null)
     setAiSummary(null)
     setMatchReasons({})
+    setAiAvailable(true)
     setQuery('')
     setSearched('')
     setError('')
@@ -191,6 +199,12 @@ export function AISearchWidget() {
                 AI-резюме
               </div>
               <p className="leading-6 text-violet-800">{aiSummary}</p>
+            </div>
+          )}
+
+          {!aiAvailable && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
+              {t('search', 'aiUnavailableBanner')}
             </div>
           )}
 

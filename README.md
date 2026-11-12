@@ -203,6 +203,7 @@ src/
 npm run dev          # Дев-сервер
 npm run build        # Продакшен-сборка (требует интернет: Google Fonts)
 npm run lint         # ESLint
+npm test             # Тесты (vitest, без БД и без сети)
 npm run db:migrate   # Новая миграция (dev)
 npm run db:seed      # Сид (регионы/технологии/админ)
 npm run db:studio    # Prisma Studio

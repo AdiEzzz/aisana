@@ -39,7 +39,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (response) return response
 
     const { id } = await params
-    const existing = await prisma.project.findUnique({ where: { id }, select: { universityId: true } })
+    const existing = await prisma.project.findUnique({
+      where: { id },
+      select: { universityId: true, isBestPractice: true, isScalable: true },
+    })
     if (!existing) return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
     if (!canAccessUniversity(user, existing.universityId)) {
       return NextResponse.json({ error: 'Недостаточно прав для этого проекта' }, { status: 403 })
@@ -59,6 +62,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Недостаточно прав для этого вуза' }, { status: 403 })
     }
 
+    // Бейджи видны публично — выдавать их может только модератор
+    const maySetBadges = user.role === UserRole.ADMIN || user.role === UserRole.EDITOR
+
     const project = await prisma.project.update({
       where: { id },
       data: {
@@ -71,8 +77,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         launchDate: data.launchDate ? new Date(data.launchDate) : null,
         category: data.category,
         status: data.status,
-        isBestPractice: data.isBestPractice || false,
-        isScalable: data.isScalable || false,
+        isBestPractice: maySetBadges ? (data.isBestPractice ?? existing.isBestPractice) : existing.isBestPractice,
+        isScalable: maySetBadges ? (data.isScalable ?? existing.isScalable) : existing.isScalable,
         impact: data.impact || null,
         results: data.results || null,
         presentationPdf: data.presentationPdf || null,
@@ -121,7 +127,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await prisma.project.delete({ where: { id } })
 
     // Чистим локально загруженные файлы проекта с диска,
-    // чтобы они не оставались сиротами в volume загрузок
+    // чтобы они не оставались сиротами в volume загрузок.
+    // Файлы, привязанные к другим проектам, останутся на диске.
     await deleteUpload(existing.agentPassportPdf)
     for (const file of existing.files) {
       await deleteUpload(file.url)

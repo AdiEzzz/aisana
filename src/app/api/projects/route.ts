@@ -34,6 +34,11 @@ export async function POST(request: NextRequest) {
     // попадёт только после проверки. Администратор и редактор публикуют сразу.
     const publication = canModerate(user) ? PublicationStatus.PUBLISHED : PublicationStatus.DRAFT
 
+    // Бейджи «лучшая практика» и «к тиражированию» видны публично,
+    // поэтому выдавать их может только модератор — представитель вуза
+    // иначе назначал бы их себе сам.
+    const maySetBadges = canModerate(user)
+
     const project = await prisma.project.create({
       data: {
         publication,
@@ -47,8 +52,8 @@ export async function POST(request: NextRequest) {
         launchDate: data.launchDate ? new Date(data.launchDate) : null,
         category: data.category || 'EDUCATION',
         status: data.status || 'IDEA',
-        isBestPractice: data.isBestPractice || false,
-        isScalable: data.isScalable || false,
+        isBestPractice: maySetBadges ? data.isBestPractice || false : false,
+        isScalable: maySetBadges ? data.isScalable || false : false,
         impact: data.impact || null,
         results: data.results || null,
         presentationPdf: data.presentationPdf || null,

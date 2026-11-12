@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { PUBLISHED_PROJECTS_RELATION } from '@/lib/publication'
 import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
 import { deleteUpload } from '@/lib/uploads'
+import { invalidateSearchIndex } from '@/lib/search/store'
 import { audit } from '@/lib/audit'
 import { parseBody, universityUpdateSchema } from '@/lib/schemas'
 
@@ -48,20 +49,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const data = parsed.data
     const university = await prisma.university.update({
       where: { id },
-      data: {
-        name: data.name,
-        nameKz: data.nameKz || null,
-        shortName: data.shortName || null,
-        regionId: data.regionId,
-        address: data.address || null,
-        website: data.website || null,
-        email: data.email || null,
-        phone: data.phone || null,
-        rector: data.rector || null,
-        description: data.description || null,
-        type: data.type || 'STATE',
-      },
+      data: providedFields(data),
     })
+    // Название, краткое имя и регион вуза индексируются поиском —
+    // без сброса кэша переименование видно только через минуту
+    invalidateSearchIndex()
+
     await audit(user, 'UPDATE', 'university', university.id, university.name)
     return NextResponse.json(university)
   } catch (error: any) {
@@ -90,9 +83,32 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       for (const f of p.files) await deleteUpload(f.url)
     }
 
+    // Проекты вуза исчезли из выдачи — индекс поиска надо пересобрать
+    invalidateSearchIndex()
+
     await audit(user, 'DELETE', 'university', id)
     return NextResponse.json({ success: true })
   } catch {
     return NextResponse.json({ error: 'Ошибка удаления' }, { status: 500 })
   }
+}
+
+/** Поля вуза, которые можно править через API. */
+const EDITABLE_FIELDS = [
+  'name', 'nameKz', 'shortName', 'regionId', 'address',
+  'website', 'email', 'phone', 'rector', 'description', 'type',
+] as const
+
+/**
+ * Только те поля, что реально пришли в теле запроса.
+ *
+ * Раньше все колонки писались через «|| null», и запрос без nameKz
+ * обнулял его в базе — молчаливая потеря данных.
+ */
+function providedFields(data: Record<string, unknown>): Record<string, unknown> {
+  const update: Record<string, unknown> = {}
+  for (const field of EDITABLE_FIELDS) {
+    if (data[field] !== undefined) update[field] = data[field]
+  }
+  return update
 }

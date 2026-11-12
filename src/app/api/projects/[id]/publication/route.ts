@@ -7,6 +7,7 @@ import { canModerate } from '@/lib/publication'
 import { invalidateSearchIndex, reclassifyProject } from '@/lib/search/store'
 import { audit } from '@/lib/audit'
 import { parseBody, publicationSchema } from '@/lib/schemas'
+import { publicationBlocker } from '@/lib/project-completeness'
 
 /**
  * Смена статуса публикации проекта.
@@ -24,7 +25,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { id } = await params
     const existing = await prisma.project.findUnique({
       where: { id },
-      select: { universityId: true, title: true, publication: true },
+      select: {
+        universityId: true, title: true, publication: true,
+        description: true, status: true, implementedAt: true,
+      },
     })
     if (!existing) return NextResponse.json({ error: 'Проект не найден' }, { status: 404 })
     if (!canAccessUniversity(user, existing.universityId)) {
@@ -51,6 +55,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         { error: 'Опубликованный проект может снять с публикации только администратор' },
         { status: 403 }
       )
+    }
+
+    // Пустую карточку нельзя ни отправить на проверку, ни опубликовать.
+    // Место внедрения требуем только с вуза: модератор должен иметь возможность
+    // опубликовать карточки, поданные до появления этого поля.
+    // Возврат в черновик и повторное сохранение того же статуса не проверяются.
+    if (next !== PublicationStatus.DRAFT && next !== existing.publication) {
+      const blocker = publicationBlocker(existing, { requireImplementedAt: !moderator })
+      if (blocker) return NextResponse.json({ error: blocker }, { status: 400 })
     }
 
     const note = typeof body.note === 'string' ? body.note.trim().slice(0, 1000) : ''

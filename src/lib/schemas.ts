@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import {
   FeedbackStatus, FeedbackTopic, HearingDecision, ProjectCategory, ProjectFileType,
-  ProjectStatus, PublicationStatus, UniversityType,
+  ProjectIndustry, ProjectStatus, PublicationStatus, UniversityType,
 } from '@prisma/client'
 
 /**
@@ -67,6 +67,9 @@ export const projectSchema = z.object({
   launchDate: z.union([z.string().trim().max(40), z.null()]).optional(),
   category: z.nativeEnum(ProjectCategory).optional(),
   status: z.nativeEnum(ProjectStatus).optional(),
+  // Пустая строка из <select> — «не выбрано»
+  industry: z.union([z.nativeEnum(ProjectIndustry), z.literal(''), z.null()]).optional(),
+  implementedAt: shortText(2_000),
   isBestPractice: z.boolean().optional(),
   isScalable: z.boolean().optional(),
   impact: shortText(EXCEL_CELL_MAX),

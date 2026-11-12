@@ -94,6 +94,11 @@ model Project {
   launchDate    DateTime?
   category      ProjectCategory
   status        ProjectStatus   @default(IDEA)
+  // Отрасль применения (не тип технологии — см. category). Заполняет вуз.
+  industry      ProjectIndustry?
+  // Где внедрено: организация или подразделение. Обязательно для вуза на
+  // стадиях IMPLEMENTED и SCALED (см. lib/project-completeness).
+  implementedAt String?         @db.Text
   technologies  Technology[]    @relation("ProjectTechnologies")
   isBestPractice Boolean        @default(false)
   isScalable    Boolean         @default(false)
@@ -136,6 +141,7 @@ model Project {
   @@index([universityId])
   @@index([status])
   @@index([category])
+  @@index([industry])
   @@index([createdAt])
   @@index([publication])
   @@map("projects")
@@ -198,6 +204,24 @@ enum ProjectCategory {
   GENERATIVE_AI
   COMPUTER_VISION
   ROBOTICS
+}
+
+enum ProjectIndustry {
+  EDUCATION_SCIENCE
+  HEALTHCARE
+  FINANCE_BUSINESS
+  INDUSTRY_MINING
+  ENERGY
+  AGRICULTURE
+  TRANSPORT
+  CONSTRUCTION
+  IT_SECURITY
+  GOVERNMENT
+  LAW
+  ECOLOGY
+  CULTURE_TOURISM_SPORT
+  SOCIAL
+  OTHER
 }
 
 enum ProjectStatus {

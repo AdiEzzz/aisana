@@ -5,6 +5,8 @@ import { formatDate, formatDateTime } from '@/lib/datetime'
 import { PUBLISHED_ONLY } from '@/lib/publication'
 import { translations } from '@/lib/i18n'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { INDUSTRIES, industryLabel } from '@/lib/industries'
+import { isDescriptionEmpty } from '@/lib/project-completeness'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +51,9 @@ export async function GET(request: NextRequest) {
       { 'Показатель': 'Внедрено и масштабировано', 'Значение': implemented.length },
       { 'Показатель': 'Лучших практик', 'Значение': projects.filter(p => p.isBestPractice).length },
       { 'Показатель': 'К тиражированию', 'Значение': projects.filter(p => p.isScalable).length },
-      { 'Показатель': 'Участников команд (сумма)', 'Значение': projects.reduce((s, p) => s + (p.teamSize || 0), 0) },
+      { 'Показатель': 'Участников команд (сумма по заполненным карточкам)', 'Значение': projects.reduce((s, p) => s + (p.teamSize || 0), 0) },
+      { 'Показатель': 'Карточек с указанным размером команды', 'Значение': projects.filter(p => p.teamSize).length },
+      { 'Показатель': 'Карточек без описания', 'Значение': projects.filter(p => isDescriptionEmpty(p.description)).length },
       { 'Показатель': 'Вузов с проектами', 'Значение': new Set(projects.map(p => p.universityId)).size },
       { 'Показатель': 'Дата выгрузки', 'Значение': formatDateTime(new Date()) },
     ]
@@ -61,6 +65,8 @@ export async function GET(request: NextRequest) {
       'Регион': p.university.region.name,
       'Категория': label('projects', p.category),
       'Статус': label('projects', p.status),
+      'Отрасль': industryLabel(p.industry),
+      'Где внедрено': p.implementedAt || '',
       'Технологии': p.technologies.map(t => t.name).join(', '),
       'Руководитель': p.leadName || '',
       'Команда, чел.': p.teamSize ?? '',
@@ -70,6 +76,25 @@ export async function GET(request: NextRequest) {
       'Просмотров': p.viewCount,
       'Попаданий в ИИ-поиск': p.searchHitCount,
     }))
+
+    // ── Лист «Стадии» ──────────────────────────────────────────
+    const STAGES = ['IDEA', 'PROTOTYPE', 'PILOT', 'IMPLEMENTED', 'SCALED'] as const
+    const byStage = STAGES.map(status => {
+      const rows = projects.filter(p => p.status === status)
+      return {
+        'Стадия': label('projects', status),
+        'Проектов': rows.length,
+        'Доля, %': projects.length ? Math.round((rows.length / projects.length) * 100) : 0,
+        'Указано, где внедрено': rows.filter(p => p.implementedAt?.trim()).length,
+        'Без описания': rows.filter(p => isDescriptionEmpty(p.description)).length,
+      }
+    })
+
+    // ── Лист «Отрасли» ─────────────────────────────────────────
+    const byIndustry = [
+      ...INDUSTRIES.map(i => ({ 'Отрасль': i.ru, 'Проектов': projects.filter(p => p.industry === i.value).length })),
+      { 'Отрасль': 'Не указана', 'Проектов': projects.filter(p => !p.industry).length },
+    ]
 
     // ── Лист «Регионы» ─────────────────────────────────────────
     const byRegion = regions.map(r => ({
@@ -90,7 +115,9 @@ export async function GET(request: NextRequest) {
       XLSX.utils.book_append_sheet(wb, ws, name)
     }
     addSheet(summary, 'Сводка', [34, 20])
-    addSheet(registry, 'Проекты', [40, 22, 24, 18, 14, 30, 22, 12, 14, 14, 14, 12, 18])
+    addSheet(registry, 'Проекты', [40, 22, 24, 18, 14, 28, 30, 30, 22, 12, 14, 14, 14, 12, 18])
+    addSheet(byStage, 'Стадии', [20, 12, 10, 24, 14])
+    addSheet(byIndustry, 'Отрасли', [42, 12])
     addSheet(byRegion, 'Регионы', [30, 10, 12])
     addSheet(byTech, 'Технологии', [30, 12])
 

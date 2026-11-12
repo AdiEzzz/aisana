@@ -8,6 +8,7 @@ import { searchIndex } from '@/lib/search/engine'
 import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
 import { audit } from '@/lib/audit'
 import { parseBody, projectSchema } from '@/lib/schemas'
+import { publicationBlocker } from '@/lib/project-completeness'
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,6 +35,13 @@ export async function POST(request: NextRequest) {
     // попадёт только после проверки. Администратор и редактор публикуют сразу.
     const publication = canModerate(user) ? PublicationStatus.PUBLISHED : PublicationStatus.DRAFT
 
+    // Модератор публикует сразу, поэтому пустую карточку останавливаем здесь.
+    // Черновик вуза может быть неполным: его проверят при отправке на проверку.
+    if (publication === PublicationStatus.PUBLISHED) {
+      const blocker = publicationBlocker(data, { requireImplementedAt: false })
+      if (blocker) return NextResponse.json({ error: blocker }, { status: 400 })
+    }
+
     // Бейджи «лучшая практика» и «к тиражированию» видны публично,
     // поэтому выдавать их может только модератор — представитель вуза
     // иначе назначал бы их себе сам.
@@ -52,6 +60,8 @@ export async function POST(request: NextRequest) {
         launchDate: data.launchDate ? new Date(data.launchDate) : null,
         category: data.category || 'EDUCATION',
         status: data.status || 'IDEA',
+        industry: data.industry || null,
+        implementedAt: data.implementedAt || null,
         isBestPractice: maySetBadges ? data.isBestPractice || false : false,
         isScalable: maySetBadges ? data.isScalable || false : false,
         impact: data.impact || null,

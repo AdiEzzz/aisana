@@ -47,10 +47,13 @@ export async function deleteUpload(url: string | null | undefined): Promise<void
 
   // На файл ещё есть ссылка — не удаляем. Проверяем и вкладку
   // «Файлы и ссылки», и паспорт проекта: ссылка может жить в обоих.
+  // Сравниваем по окончанию: часть ссылок записана полным адресом портала
+  // (https://…/uploads/имя.pdf), а не относительным.
+  const suffix = `/uploads/${filename}`
   try {
     const [asFile, asPassport] = await Promise.all([
-      prisma.projectFile.count({ where: { url } }),
-      prisma.project.count({ where: { agentPassportPdf: url } }),
+      prisma.projectFile.count({ where: { url: { endsWith: suffix } } }),
+      prisma.project.count({ where: { agentPassportPdf: { endsWith: suffix } } }),
     ])
     if (asFile > 0 || asPassport > 0) return
   } catch (error) {

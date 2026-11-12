@@ -1,17 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireApiRole } from '@/lib/auth'
+import { requireApiRole, requireApiUser } from '@/lib/auth'
+import { canViewProjectContent } from '@/lib/publication'
 import { audit } from '@/lib/audit'
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Настоящая проверка сессии: middleware смотрит только наличие cookie
+    const { user, response } = await requireApiUser(request)
+    if (response) return response
+
     const { id } = await params
     const hearing = await prisma.hearing.findUnique({
       where: { id },
       include: { project: { include: { university: true } } },
     })
     if (!hearing) return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+    // Слушание черновика не должно читаться в обход видимости проекта
+    if (!canViewProjectContent(user, hearing.project)) {
+      return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+    }
     return NextResponse.json(hearing)
   } catch {
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 })

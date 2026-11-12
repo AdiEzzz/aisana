@@ -1,15 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
-import { canAccessUniversity, requireApiRole } from '@/lib/auth'
+import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
+import { canViewProjectContent } from '@/lib/publication'
 import { deleteUpload } from '@/lib/uploads'
 import { audit } from '@/lib/audit'
 import { ProjectFileType, UserRole } from '@prisma/client'
 
 const FILE_TYPES = new Set<string>(Object.values(ProjectFileType))
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  // Настоящая проверка сессии: middleware смотрит только наличие cookie
+  const { user, response } = await requireApiUser(request)
+  if (response) return response
+
   const { id } = await params
+  // Файлы черновика не должны утекать: сам проект скрыт от посторонних,
+  // но файлы читались отдельным эндпоинтом
+  const project = await prisma.project.findUnique({
+    where: { id },
+    select: { universityId: true, publication: true },
+  })
+  if (!project || !canViewProjectContent(user, project)) {
+    return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+  }
+
   const files = await prisma.projectFile.findMany({
     where: { projectId: id },
     orderBy: { createdAt: 'asc' },

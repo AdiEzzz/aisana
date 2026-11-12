@@ -2,19 +2,30 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { canAccessUniversity, requireApiRole } from '@/lib/auth'
+import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
 import { deleteUpload } from '@/lib/uploads'
 import { invalidateSearchIndex, reclassifyProject } from '@/lib/search/store'
 import { audit } from '@/lib/audit'
 
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // Middleware проверяет только НАЛИЧИЕ cookie — настоящая проверка
+    // сессии и ролей здесь. Без неё поддельная cookie открывала черновики.
+    const { user, response } = await requireApiUser(request)
+    if (response) return response
+
     const { id } = await params
     const project = await prisma.project.findUnique({
       where: { id },
       include: { university: { include: { region: true } }, technologies: true, hearings: { orderBy: { date: 'desc' } } },
     })
     if (!project) return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+
+    // Черновик и проект на проверке видны только модераторам и автору из вуза
+    if (project.publication !== 'PUBLISHED' && !canAccessUniversity(user, project.universityId)) {
+      return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+    }
+
     return NextResponse.json(project)
   } catch {
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 })

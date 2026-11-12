@@ -9,6 +9,8 @@ import { Mic, Plus, Calendar, CheckCircle, XCircle, Clock, AlertCircle, Trending
 import { formatDateLong } from '@/lib/utils'
 import { HearingDecision } from '@prisma/client'
 import { HEARING_DECISION_LABELS } from '@/types'
+import { requireUser } from '@/lib/auth'
+import { visibleProjectsWhere, visibilityScope } from '@/lib/publication'
 
 const DECISION_ICONS: Record<HearingDecision, React.ElementType> = {
   PENDING: Clock,
@@ -27,7 +29,14 @@ const DECISION_COLORS: Record<HearingDecision, string> = {
 }
 
 export default async function HearingsPage() {
-  const hearings = await cached('hearings-list', 60_000, () => prisma.hearing.findMany({
+  // Настоящая проверка сессии: middleware смотрит только наличие cookie
+  const user = await requireUser('/')
+  // Слушания черновиков посторонним не показываем. Ключ кэша включает
+  // область видимости: набор данных зависит от роли, общий кэш отдавал бы
+  // одному пользователю чужой список.
+  const scope = visibilityScope(user)
+  const hearings = await cached(`hearings-list:${scope}`, 60_000, () => prisma.hearing.findMany({
+    where: { project: visibleProjectsWhere(user) },
     include: {
       project: {
         include: { university: { include: { region: true } } },

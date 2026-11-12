@@ -4,17 +4,19 @@ import { prisma } from '@/lib/prisma'
 import { requireApiRole, requireApiUser } from '@/lib/auth'
 import { visibleProjectsWhere } from '@/lib/publication'
 import { audit } from '@/lib/audit'
+import { parseBody, hearingSchema } from '@/lib/schemas'
 
 export async function POST(request: NextRequest) {
   try {
     const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR])
     if (response) return response
 
-    const data = await request.json()
-
-    if (!data.projectId || !data.date) {
-      return NextResponse.json({ error: 'Проект и дата обязательны' }, { status: 400 })
+    const body = await request.json().catch(() => ({}))
+    const parsed = parseBody(hearingSchema, body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
+    const data = parsed.data
 
     const hearing = await prisma.hearing.create({
       data: {

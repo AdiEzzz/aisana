@@ -7,13 +7,19 @@ import { invalidateSearchIndex, loadSearchIndex, reclassifyProject } from '@/lib
 import { searchIndex } from '@/lib/search/engine'
 import { canAccessUniversity, requireApiRole, requireApiUser } from '@/lib/auth'
 import { audit } from '@/lib/audit'
+import { parseBody, projectSchema } from '@/lib/schemas'
 
 export async function POST(request: NextRequest) {
   try {
     const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP])
     if (response) return response
 
-    const data = await request.json()
+    const body = await request.json().catch(() => ({}))
+    const parsed = parseBody(projectSchema, body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
+    }
+    const data = parsed.data
     const universityId = user.role === UserRole.UNIVERSITY_REP ? user.universityId : data.universityId
 
     if (!data.title || !data.description || !universityId) {
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest) {
         universityId,
         leadName: data.leadName || null,
         leadEmail: data.leadEmail || null,
-        teamSize: data.teamSize ? parseInt(data.teamSize) : null,
+        teamSize: data.teamSize ?? null,
         launchDate: data.launchDate ? new Date(data.launchDate) : null,
         category: data.category || 'EDUCATION',
         status: data.status || 'IDEA',

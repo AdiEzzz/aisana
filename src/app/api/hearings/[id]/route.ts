@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { requireApiRole, requireApiUser } from '@/lib/auth'
 import { canViewProjectContent } from '@/lib/publication'
 import { audit } from '@/lib/audit'
+import { parseBody, hearingSchema } from '@/lib/schemas'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -33,7 +34,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (response) return response
 
     const { id } = await params
-    const data = await request.json()
+    const body = await request.json().catch(() => ({}))
+    const parsed = parseBody(hearingSchema, body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
+    }
+    const data = parsed.data
     const hearing = await prisma.hearing.update({
       where: { id },
       data: {

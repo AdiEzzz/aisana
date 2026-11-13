@@ -16,6 +16,8 @@ model User {
   universityId String?
   university   University? @relation(fields: [universityId], references: [id], onDelete: SetNull)
   image        String?
+  // Когда пользователь последний раз вошёл; null — ни разу не входил
+  lastLoginAt  DateTime?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   sessions     Session[]

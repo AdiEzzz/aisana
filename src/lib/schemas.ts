@@ -131,6 +131,13 @@ export const publicationSchema = z.object({
   note: z.string().trim().max(1000).optional(),
 })
 
+/** Массовая смена статуса: не больше страницы списка за раз. */
+export const bulkPublicationSchema = z.object({
+  ids: z.array(z.string().trim().min(1).max(64)).min(1).max(100),
+  publication: z.nativeEnum(PublicationStatus),
+  note: z.string().trim().max(1000).optional(),
+})
+
 export const userCreateSchema = z.object({
   email: z.string().trim().email().max(255),
   name: shortText(200),

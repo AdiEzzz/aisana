@@ -73,6 +73,11 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    // Отметка о входе: по ней в админке видно, кто из вузов ни разу не заходил.
+    // Не критично для входа — ошибка записи не должна его ломать.
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
+      .catch(error => console.error('Failed to store last login', error))
+
     const response = NextResponse.json({ ok: true })
     response.cookies.set(SESSION_COOKIE, sessionToken, {
       httpOnly: true,

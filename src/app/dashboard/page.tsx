@@ -34,7 +34,9 @@ async function getDashboardData() {
       include: { _count: { select: { projects: { where: PUBLISHED_ONLY } } } },
       orderBy: { projects: { _count: 'desc' } },
     }),
-    prisma.project.aggregate({ _sum: { teamSize: true }, where: PUBLISHED_ONLY }),
+    // _count.teamSize — в скольких карточках размер команды вообще указан:
+    // сумма без этого числа выглядит как «всего участников», хотя поле заполнено не везде
+    prisma.project.aggregate({ _sum: { teamSize: true }, _count: { teamSize: true }, where: PUBLISHED_ONLY }),
     prisma.project.count({ where: { ...PUBLISHED_ONLY, isBestPractice: true } }),
     prisma.technology.findMany({
       include: { _count: { select: { projects: { where: PUBLISHED_ONLY } } } },
@@ -81,20 +83,25 @@ async function getDashboardData() {
   }
 
   // ── KPI вузов: минимум N проектов на вуз ───────────────────
+  // Вузы без проектов показываем отдельной строкой: семьдесят строк с нулём
+  // в начале списка закрывали тех, кому до цели осталось немного
+  const withoutProjects = allUniversities.filter(u => u._count.projects === 0)
   const failingUniversities = allUniversities
-    .filter(u => u._count.projects < UNIVERSITY_KPI_TARGET)
+    .filter(u => u._count.projects > 0 && u._count.projects < UNIVERSITY_KPI_TARGET)
     .map(u => ({
       name: u.name,
       shortName: u.shortName || u.name,
       count: u._count.projects,
       missing: UNIVERSITY_KPI_TARGET - u._count.projects,
     }))
-    .sort((a, b) => b.missing - a.missing)
+    // Сначала те, кому до цели ближе всего
+    .sort((a, b) => a.missing - b.missing)
   const universityKpi = {
     target: UNIVERSITY_KPI_TARGET,
-    met: allUniversities.length - failingUniversities.length,
-    notMet: failingUniversities.length,
+    met: allUniversities.length - failingUniversities.length - withoutProjects.length,
+    notMet: failingUniversities.length + withoutProjects.length,
     failing: failingUniversities,
+    withoutProjects: withoutProjects.map(u => u.shortName || u.name),
   }
 
   // ── Проекты по регионам ────────────────────────────────────
@@ -107,10 +114,12 @@ async function getDashboardData() {
   return {
     kpi: {
       totalUniversities,
+      universitiesWithProjects: allUniversities.length - withoutProjects.length,
       totalProjects,
       implementedProjects: implementedProjects + scaledProjects,
       inProgressProjects,
       teamMembers: teamAgg._sum.teamSize ?? 0,
+      teamProjects: teamAgg._count.teamSize,
       bestPractices: bestPracticesCount,
     },
     universityKpi,

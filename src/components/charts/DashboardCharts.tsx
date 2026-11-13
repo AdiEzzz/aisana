@@ -25,6 +25,7 @@ interface Props {
     met: number
     notMet: number
     failing: { name: string; shortName: string; count: number; missing: number }[]
+    withoutProjects: string[]
   }
   byRegion: { name: string; nameKz: string | null; count: number }[]
   byStatus: { status: string; count: number }[]
@@ -142,7 +143,7 @@ export function DashboardCharts({
             <div className="text-xs text-slate-500 mt-0.5 font-medium">{t('dashboard', 'kpiNotMet')}</div>
           </div>
         </div>
-        {universityKpi.failing.length === 0 ? (
+        {universityKpi.failing.length === 0 && universityKpi.withoutProjects.length === 0 ? (
           <p className="text-emerald-600 text-sm py-4 flex items-center gap-1.5">
             <CheckCircle2 size={15} />{t('dashboard', 'kpiAllMet')}
           </p>
@@ -165,6 +166,14 @@ export function DashboardCharts({
                 </div>
               </div>
             ))}
+            {universityKpi.withoutProjects.length > 0 && (
+              <details className="pt-1">
+                <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+                  {t('dashboard', 'kpiNoProjects')}: <span className="font-semibold text-red-600">{universityKpi.withoutProjects.length}</span>
+                </summary>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{universityKpi.withoutProjects.join(', ')}</p>
+              </details>
+            )}
           </div>
         )}
       </ChartCard>
@@ -210,7 +219,7 @@ export function DashboardCharts({
               <tr key={row.status} className="border-b border-slate-50">
                 <td className="py-2 text-slate-700">
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle" style={{ backgroundColor: row.color }} />
-                  {row.name}
+                  <Link href={`/projects?status=${row.status}`} className="hover:text-blue-600 hover:underline">{row.name}</Link>
                 </td>
                 <td className="py-2 text-right font-semibold text-slate-800 tabular-nums">{row.total}</td>
                 <td className="py-2 text-right text-slate-500 tabular-nums">{share(row.total, stageTotal)}</td>
@@ -238,7 +247,7 @@ export function DashboardCharts({
         <div className="space-y-2 pt-2">
           {industryRows.map(row => (
             <div key={row.key} className="flex items-center gap-3">
-              <span className={`text-xs w-56 shrink-0 text-right ${row.key === 'NONE' ? 'text-slate-400 italic' : 'text-slate-600'}`}>{row.name}</span>
+              <Link href={`/projects?industry=${row.key}`} className={`text-xs w-56 shrink-0 text-right hover:text-blue-600 hover:underline ${row.key === 'NONE' ? 'text-slate-400 italic' : 'text-slate-600'}`}>{row.name}</Link>
               <div className="flex-1 h-5 bg-slate-50 rounded overflow-hidden">
                 {row.key !== 'NONE' && (
                   <div className="h-full bg-blue-500 rounded" style={{ width: `${(row.count / industryMax) * 100}%` }} />

@@ -12,6 +12,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { user, response } = await requireApiUser(request)
     if (response) return response
 
+    // Заслушивания партнёру закрыты: отвечаем как на несуществующее
+    if (user.role === UserRole.BUSINESS) {
+      return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+    }
+
     const { id } = await params
     const hearing = await prisma.hearing.findUnique({
       where: { id },

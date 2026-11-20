@@ -44,6 +44,12 @@ export async function GET(request: NextRequest) {
     const { user, response } = await requireApiUser(request)
     if (response) return response
 
+    // Заслушивания — внутренняя работа комиссии: партнёру они закрыты и в API,
+    // а не только на страницах
+    if (user.role === UserRole.BUSINESS) {
+      return NextResponse.json({ error: 'Недостаточно прав' }, { status: 403 })
+    }
+
     // Слушания черновиков посторонним не показываем: модераторы видят всё,
     // представитель вуза — проекты своего вуза, остальные — только опубликованные
     const hearings = await prisma.hearing.findMany({

@@ -64,6 +64,14 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Недостаточно прав для этого вуза' }, { status: 403 })
     }
 
+    const universityExists = await prisma.university.findUnique({
+      where: { id: universityId },
+      select: { id: true },
+    })
+    if (!universityExists) {
+      return NextResponse.json({ error: 'Вуз не найден' }, { status: 400 })
+    }
+
     // Карточка уже на проверке или опубликована — вуз не может сохранить её
     // пустой или «внедрённой» без места внедрения. Черновик сохраняется как есть.
     // Модератора не блокируем: ему нужно править и карточки, поданные до этого правила.

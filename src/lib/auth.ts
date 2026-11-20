@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { NextRequest, NextResponse } from 'next/server'
@@ -43,10 +44,14 @@ async function findUserByToken(token?: string) {
   return session.user
 }
 
-export async function getCurrentUser() {
+/**
+ * Текущий пользователь. Результат запоминается на время одного запроса:
+ * layout и страница проверяют сессию оба, а в базу идёт один запрос.
+ */
+export const getCurrentUser = cache(async () => {
   const cookieStore = await cookies()
   return findUserByToken(cookieStore.get(SESSION_COOKIE)?.value)
-}
+})
 
 export async function getCurrentUserFromRequest(request: NextRequest) {
   return findUserByToken(request.cookies.get(SESSION_COOKIE)?.value)

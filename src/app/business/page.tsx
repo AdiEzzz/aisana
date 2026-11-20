@@ -1,19 +1,13 @@
 import { Suspense } from 'react'
 import Link from 'next/link'
-import { Building2, FileText, Loader2, MapPin, PlayCircle, Search, Sparkles } from 'lucide-react'
 import { UserRole } from '@prisma/client'
+import { Building2, FileText, Loader2, MapPin, PlayCircle, Sparkles } from 'lucide-react'
 import { requireRole } from '@/lib/auth'
-import { loadShowcase, logPartnerSearch, matchShowcaseForTask, topicCounts } from '@/lib/business'
-import { hasDemo, hasDocuments } from '@/lib/card-checklist'
+import { loadShowcase, logPartnerSearch, matchShowcaseForTask, topicCounts, type ShowcaseItem } from '@/lib/business'
 import { TOPIC_BY_ID, type TopicId } from '@/lib/search/taxonomy'
-import { INDUSTRIES, industryLabel } from '@/lib/industries'
+import { industryLabel } from '@/lib/industries'
 import { StatusBadge } from '@/components/ui/status-badge'
-
-const STATUSES = [
-  { value: 'PILOT', label: 'Пилот' },
-  { value: 'IMPLEMENTED', label: 'Внедрено' },
-  { value: 'SCALED', label: 'Масштабировано' },
-]
+import { ShowcaseSearchForm } from '@/components/business/ShowcaseSearchForm'
 
 const PAGE_SIZE = 24
 
@@ -29,11 +23,13 @@ const STAGE_HINTS: Record<string, string> = {
 /** Короче этого — не описание задачи: ИИ нечего подбирать, показываем обычный поиск. */
 const MIN_TASK_LENGTH = 12
 
-type ShowcaseProject = Awaited<ReturnType<typeof loadShowcase>>[number]
+const PARTNER_ROLES = [UserRole.BUSINESS, UserRole.ADMIN, UserRole.EDITOR]
+
+type Params = { q?: string; topic?: string; industry?: string; status?: string; all?: string; page?: string; ai?: string }
 
 const topicLabel = (topic: string) => TOPIC_BY_ID.get(topic as TopicId)?.label ?? topic
 
-function SolutionCard({ project, fit, reason }: { project: ShowcaseProject; fit?: 'direct' | 'adaptable' | null; reason?: string }) {
+function SolutionCard({ project, fit, reason }: { project: ShowcaseItem; fit?: 'direct' | 'adaptable' | null; reason?: string }) {
   return (
     <Link href={`/projects/${project.id}`}
       className="group flex flex-col rounded-xl border border-slate-200 bg-white p-5 transition-all hover:border-blue-300 hover:shadow-md">
@@ -63,16 +59,36 @@ function SolutionCard({ project, fit, reason }: { project: ShowcaseProject; fit?
           <p className="flex items-start gap-1.5"><MapPin size={12} className="mt-0.5 shrink-0 text-slate-400" /> <span className="line-clamp-1">Внедрено: {project.implementedAt}</span></p>
         )}
         <p className="flex flex-wrap gap-3 pt-1">
-          {hasDocuments(project) && <span className="inline-flex items-center gap-1 text-emerald-700"><FileText size={12} /> документы</span>}
-          {hasDemo(project) && <span className="inline-flex items-center gap-1 text-emerald-700"><PlayCircle size={12} /> демо</span>}
+          {project.hasDocuments && <span className="inline-flex items-center gap-1 text-emerald-700"><FileText size={12} /> документы</span>}
+          {project.hasDemo && <span className="inline-flex items-center gap-1 text-emerald-700"><PlayCircle size={12} /> демо</span>}
         </p>
       </div>
     </Link>
   )
 }
 
-/** Подбор под задачу: грузится отдельно, чтобы ответ ИИ не задерживал страницу. */
+/** Заготовка на время загрузки: те же блоки, что и у результатов, без данных. */
+function ResultsSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Загрузка решений">
+      <div className="mb-4 h-5 w-64 animate-pulse rounded bg-slate-200" />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 6 }, (_, at) => (
+          <div key={at} className="h-48 animate-pulse rounded-xl border border-slate-200 bg-white p-5">
+            <div className="mb-3 h-4 w-24 rounded bg-slate-100" />
+            <div className="mb-2 h-4 w-3/4 rounded bg-slate-100" />
+            <div className="mb-1 h-3 w-full rounded bg-slate-100" />
+            <div className="h-3 w-5/6 rounded bg-slate-100" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Подбор под задачу: грузится отдельно, чтобы ответ ИИ не задерживал остальное. */
 async function TaskPicks({ task }: { task: string }) {
+  await requireRole(PARTNER_ROLES, '/business')
   const { ai, picks, candidates } = await matchShowcaseForTask(task)
   const requestHref = `/business/requests/new?description=${encodeURIComponent(task.slice(0, 1500))}`
 
@@ -100,7 +116,7 @@ async function TaskPicks({ task }: { task: string }) {
           <p className="mt-3 text-sm text-slate-500">
             Не то, что нужно?{' '}
             <Link href={requestHref} className="font-medium text-blue-600 hover:underline">Опубликуйте задачу</Link>
-            {' '}— вузы откликнутся сами.
+            {' '}— вузы предложат решение сами.
           </p>
         </>
       )}
@@ -108,25 +124,10 @@ async function TaskPicks({ task }: { task: string }) {
   )
 }
 
-/**
- * Витрина решений для бизнеса: опубликованные проекты вузов, у которых есть
- * описание и подтверждение (документ или демо). По умолчанию — от стадии «Пилот».
- * Витрина и поиск по словам работают без ИИ. Подбор с ИИ — отдельной кнопкой:
- * задачу описывают своими словами, ИИ выбирает решения и объясняет выбор.
- */
-export default async function ShowcasePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string; topic?: string; industry?: string; status?: string; all?: string; page?: string; ai?: string }>
-}) {
-  // Страница проверяет роль сама: при переходе внутри кабинета layout заново не выполняется
-  const user = await requireRole([UserRole.BUSINESS, UserRole.ADMIN, UserRole.EDITOR], '/business')
-  const params = await searchParams
+/** Результаты витрины: список решений, направления и страницы. */
+async function Results({ params, query, withAi }: { params: Params; query: string; withAi: boolean }) {
+  const user = await requireRole(PARTNER_ROLES, '/business')
   const all = params.all === '1'
-  const query = (params.q ?? '').trim()
-  // Подбор с ИИ — только по отдельной кнопке: обычный поиск и витрина работают без него
-  const withAi = params.ai === '1' && query.length >= MIN_TASK_LENGTH
-  const tooShortForAi = params.ai === '1' && query.length < MIN_TASK_LENGTH
 
   // Счётчики направлений считаем по витрине без фильтра направления,
   // иначе после выбора одного остальные исчезли бы из списка
@@ -154,59 +155,11 @@ export default async function ShowcasePage({
     return text ? `/business?${text}` : '/business'
   }
 
-  const inputCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  const chip = (active: boolean) =>
+    `rounded-full border px-3 py-1 text-xs transition-colors ${active ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`
 
   return (
-    <div>
-      <form className="mb-6 rounded-xl border border-slate-200 bg-white p-5">
-        <h1 className="text-lg font-bold text-slate-800">Витрина решений</h1>
-        <p className="mb-3 mt-1 text-sm text-slate-500">
-          Разработки команд казахстанских вузов программы AI-Sana. Решения открыты к совместному пилоту и доработке под задачи вашей организации. Ищите по словам или опишите задачу — ИИ подберёт решения и объяснит выбор.
-        </p>
-        <textarea name="q" defaultValue={query} rows={2} maxLength={600} className={`${inputCls} resize-none`}
-          placeholder="Слова для поиска: чат-бот, распознавание документов. Или задача целиком: каждый день приходит 300 обращений клиентов, нужно определять тему и направлять в отдел" />
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="submit" className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            <Search size={14} /> Найти
-          </button>
-          <button type="submit" name="ai" value="1" className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100">
-            <Sparkles size={14} /> Подобрать с ИИ
-          </button>
-          <select name="industry" defaultValue={params.industry || ''} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-            <option value="">Все отрасли</option>
-            {INDUSTRIES.map(industry => <option key={industry.value} value={industry.value}>{industry.ru}</option>)}
-          </select>
-          <select name="status" defaultValue={params.status || ''} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-            <option value="">От пилота и выше</option>
-            {STATUSES.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
-          </select>
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            <input type="checkbox" name="all" value="1" defaultChecked={all} className="h-4 w-4 rounded" />
-            Показывать также идеи и прототипы
-          </label>
-          {params.topic && <input type="hidden" name="topic" value={params.topic} />}
-          {(query || params.topic || params.industry || params.status || all) && (
-            <Link href="/business" className="ml-auto text-sm text-slate-500 hover:text-slate-700">Сбросить</Link>
-          )}
-        </div>
-      </form>
-
-      {tooShortForAi && (
-        <p className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Для подбора с ИИ опишите задачу подробнее — хотя бы одним предложением. Ниже результаты обычного поиска.
-        </p>
-      )}
-
-      {withAi && page === 1 && (
-        <Suspense fallback={
-          <div className="mb-8 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
-            <Loader2 size={16} className="animate-spin text-violet-500" /> ИИ читает карточки и подбирает решения под задачу…
-          </div>
-        }>
-          <TaskPicks task={query} />
-        </Suspense>
-      )}
-
+    <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="font-semibold text-slate-800">{query ? 'Все результаты поиска' : 'Все решения витрины'}</h2>
         <span className="text-sm text-slate-500">{projects.length}</span>
@@ -215,13 +168,9 @@ export default async function ShowcasePage({
 
       {topics.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-1.5">
-          <Link href={href({ topic: undefined })}
-            className={`rounded-full border px-3 py-1 text-xs transition-colors ${!params.topic ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
-            Все направления
-          </Link>
+          <Link href={href({ topic: undefined })} className={chip(!params.topic)}>Все направления</Link>
           {topics.map(({ topic, count }) => (
-            <Link key={topic} href={href({ topic })}
-              className={`rounded-full border px-3 py-1 text-xs transition-colors ${params.topic === topic ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+            <Link key={topic} href={href({ topic })} className={chip(params.topic === topic)}>
               {topicLabel(topic)} <span className="text-slate-400">{count}</span>
             </Link>
           ))}
@@ -248,6 +197,59 @@ export default async function ShowcasePage({
           {page < totalPages && <Link href={href({ page: String(page + 1) })} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:border-blue-300">Вперёд →</Link>}
         </div>
       )}
+    </>
+  )
+}
+
+/**
+ * Витрина решений для партнёра: опубликованные проекты вузов, у которых есть
+ * описание и подтверждение (документ или демо). По умолчанию — от стадии «Пилот».
+ * Витрина и поиск по словам работают без ИИ. Подбор с ИИ — отдельной кнопкой.
+ *
+ * Страница отдаёт форму сразу, а результаты и подбор с ИИ подгружаются под
+ * ней каждый в своём блоке: поиск не закрывает экран общей заставкой.
+ * Роль проверяют сами блоки с данными — в форме данных нет.
+ */
+export default async function ShowcasePage({ searchParams }: { searchParams: Promise<Params> }) {
+  const params = await searchParams
+  const query = (params.q ?? '').trim()
+  // Подбор с ИИ — только по отдельной кнопке: обычный поиск и витрина работают без него
+  const withAi = params.ai === '1' && query.length >= MIN_TASK_LENGTH
+  const tooShortForAi = params.ai === '1' && query.length < MIN_TASK_LENGTH
+  const firstPage = !params.page || params.page === '1'
+  // Смена условий поиска заново показывает заготовку вместо старых результатов
+  const searchKey = JSON.stringify([query, params.topic, params.industry, params.status, params.all, params.page])
+
+  return (
+    <div>
+      <ShowcaseSearchForm
+        key={JSON.stringify([query, params.industry, params.status, params.all, params.topic])}
+        query={query}
+        industry={params.industry || ''}
+        status={params.status || ''}
+        all={params.all === '1'}
+        topic={params.topic || ''}
+      />
+
+      {tooShortForAi && (
+        <p className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Для подбора с ИИ опишите задачу подробнее — хотя бы одним предложением. Ниже результаты обычного поиска.
+        </p>
+      )}
+
+      {withAi && firstPage && (
+        <Suspense key={`ai:${query}`} fallback={
+          <div className="mb-8 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+            <Loader2 size={16} className="animate-spin text-violet-500" /> ИИ читает карточки и подбирает решения под задачу…
+          </div>
+        }>
+          <TaskPicks task={query} />
+        </Suspense>
+      )}
+
+      <Suspense key={searchKey} fallback={<ResultsSkeleton />}>
+        <Results params={params} query={query} withAi={withAi} />
+      </Suspense>
     </div>
   )
 }

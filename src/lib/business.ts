@@ -2,7 +2,9 @@ import { UserRole, type ProjectIndustry, type ProjectStatus } from '@prisma/clie
 import { INDUSTRIES } from '@/lib/industries'
 import { prisma } from '@/lib/prisma'
 import { PUBLISHED_ONLY } from '@/lib/publication'
-import { isConfirmed } from '@/lib/card-checklist'
+import { unstable_cache } from 'next/cache'
+import { cached } from '@/lib/data-cache'
+import { hasDemo, hasDocuments, isConfirmed } from '@/lib/card-checklist'
 import { loadSearchIndex } from '@/lib/search/store'
 import { searchIndex } from '@/lib/search/engine'
 import { matchTask } from '@/lib/gemini-assist'
@@ -44,81 +46,126 @@ export interface ShowcaseFilters {
 /** Направление с меньшим коэффициентом проекту приписано слабо — в фильтр не берём. */
 const TOPIC_MIN_SCORE = 45
 
-const SHOWCASE_SELECT = {
-  id: true,
-  title: true,
-  description: true,
-  impact: true,
-  results: true,
-  status: true,
-  category: true,
-  industry: true,
-  implementedAt: true,
-  agentPassportPdf: true,
-  presentationPdf: true,
-  presentationPptx: true,
-  videoUrl: true,
-  files: { select: { type: true, url: true } },
-  topics: { where: { score: { gte: TOPIC_MIN_SCORE } }, orderBy: { score: 'desc' }, select: { topic: true } },
-  university: { select: { name: true, shortName: true, region: { select: { name: true } } } },
-} as const
+/** Сколько знаков описания хранит витрина: хватает и карточке, и подбору с ИИ. */
+const DESCRIPTION_PREVIEW = 420
+
+/** Решение витрины: только то, что нужно карточке, фильтрам и подбору. */
+export interface ShowcaseItem {
+  id: string
+  title: string
+  description: string
+  status: ProjectStatus
+  industry: ProjectIndustry | null
+  implementedAt: string | null
+  university: { name: string; shortName: string | null }
+  topics: { topic: string }[]
+  hasDocuments: boolean
+  hasDemo: boolean
+}
 
 /**
- * Проекты витрины: опубликованные и подтверждённые (есть описание и хотя бы
- * документ или демо). По умолчанию — от стадии «Пилот»: бизнесу нужны
- * решения, которые уже работают.
+ * Все решения витрины: опубликованные и подтверждённые (есть описание и
+ * хотя бы документ или демо), любых стадий.
+ *
+ * Это самая тяжёлая выборка кабинета: все опубликованные карточки с файлами
+ * и направлениями. Раньше она выполнялась на каждый поиск и каждый щелчок по
+ * фильтру. Теперь набор собирается раз в две минуты и хранится в кэше данных
+ * Next.js (общий для всех экземпляров на Vercel), а поиск и фильтры работают
+ * по нему в памяти. Плата — новая или исправленная карточка появляется на
+ * витрине с задержкой до двух минут.
  */
-export async function loadShowcase(filters: ShowcaseFilters) {
-  const statuses = filters.status && ['IDEA', 'PROTOTYPE', 'PILOT', 'IMPLEMENTED', 'SCALED'].includes(filters.status)
-    ? [filters.status as ProjectStatus]
-    : filters.all ? undefined : READY_STATUSES
+const loadShowcaseFromDb = unstable_cache(
+  async (): Promise<ShowcaseItem[]> => {
+    const projects = await prisma.project.findMany({
+      where: PUBLISHED_ONLY,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        impact: true,
+        results: true,
+        status: true,
+        industry: true,
+        implementedAt: true,
+        agentPassportPdf: true,
+        presentationPdf: true,
+        presentationPptx: true,
+        videoUrl: true,
+        files: { select: { type: true, url: true } },
+        topics: { where: { score: { gte: TOPIC_MIN_SCORE } }, orderBy: { score: 'desc' }, select: { topic: true } },
+        university: { select: { name: true, shortName: true } },
+      },
+      orderBy: [{ isBestPractice: 'desc' }, { updatedAt: 'desc' }, { id: 'desc' }],
+    })
 
-  let ids: string[] | null = null
+    return projects.filter(isConfirmed).map(project => {
+      const description = project.description.replace(/\s+/g, ' ').trim()
+      return {
+        id: project.id,
+        title: project.title,
+        description: description.length > DESCRIPTION_PREVIEW ? `${description.slice(0, DESCRIPTION_PREVIEW)}…` : description,
+        status: project.status,
+        industry: project.industry,
+        implementedAt: project.implementedAt,
+        university: project.university,
+        topics: project.topics,
+        hasDocuments: hasDocuments(project),
+        hasDemo: hasDemo(project),
+      }
+    })
+  },
+  ['showcase-base-v1'],
+  { revalidate: 120, tags: ['showcase'] },
+)
+
+/** Тот же набор с кэшем в памяти экземпляра: повторные запросы не ходят даже в кэш данных. */
+export function loadShowcaseBase(): Promise<ShowcaseItem[]> {
+  return cached('showcase-base', 60_000, () => loadShowcaseFromDb())
+}
+
+/** Идентификаторы решений по поисковому запросу, от самого подходящего. */
+async function searchIds(query: string, options: { limit: number; minScore?: number; broad?: boolean }): Promise<string[]> {
+  const { hits } = searchIndex(await loadSearchIndex(), query.slice(0, 600), options)
+  return hits.map(hit => hit.id)
+}
+
+/**
+ * Решения витрины по фильтрам. По умолчанию — от стадии «Пилот»: партнёру
+ * нужны решения, которые уже работают.
+ */
+export async function loadShowcase(filters: ShowcaseFilters): Promise<ShowcaseItem[]> {
+  const statuses: ProjectStatus[] | null =
+    filters.status && ['IDEA', 'PROTOTYPE', 'PILOT', 'IMPLEMENTED', 'SCALED'].includes(filters.status)
+      ? [filters.status as ProjectStatus]
+      : filters.all ? null : READY_STATUSES
+  const industry = filters.industry && INDUSTRIES.some(item => item.value === filters.industry) ? filters.industry : null
   const query = (filters.q ?? '').trim()
-  if (query) {
-    const { hits } = searchIndex(await loadSearchIndex(), query, { limit: 200 })
-    ids = hits.map(hit => hit.id)
-  }
 
-  const projects = await prisma.project.findMany({
-    where: {
-      ...PUBLISHED_ONLY,
-      ...(statuses ? { status: { in: statuses } } : {}),
-      ...(filters.industry && INDUSTRIES.some(item => item.value === filters.industry)
-        ? { industry: filters.industry as ProjectIndustry }
-        : {}),
-      ...(filters.topic ? { topics: { some: { topic: filters.topic, score: { gte: TOPIC_MIN_SCORE } } } } : {}),
-      ...(ids ? { id: { in: ids } } : {}),
-    },
-    select: SHOWCASE_SELECT,
-    orderBy: [{ isBestPractice: 'desc' }, { updatedAt: 'desc' }],
-  })
+  const [base, ids] = await Promise.all([
+    loadShowcaseBase(),
+    query ? searchIds(query, { limit: 200 }) : null,
+  ])
 
-  const confirmed = projects.filter(isConfirmed)
-  if (!ids) return confirmed
+  const found = base.filter(project =>
+    (!statuses || statuses.includes(project.status)) &&
+    (!industry || project.industry === industry) &&
+    (!filters.topic || project.topics.some(item => item.topic === filters.topic)),
+  )
+  if (!ids) return found
 
   // При поиске порядок — по релевантности, а не по дате
   const order = new Map(ids.map((id, at) => [id, at]))
-  return confirmed.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+  return found.filter(project => order.has(project.id)).sort((a, b) => order.get(a.id)! - order.get(b.id)!)
 }
 
-/** Решения с витрины, подходящие под запрос бизнеса: поиск по тексту запроса. */
+/** Решения с витрины, подходящие под задачу партнёра: поиск по её тексту. */
 export async function matchProjectsForRequest(request: { title: string; description: string }, limit = 6) {
-  const { hits } = searchIndex(await loadSearchIndex(), `${request.title} ${request.description}`.slice(0, 600), {
-    limit: 40,
-    minScore: 25,
-  })
-  if (hits.length === 0) return []
-
-  const projects = await prisma.project.findMany({
-    where: { id: { in: hits.map(hit => hit.id) }, ...PUBLISHED_ONLY },
-    select: SHOWCASE_SELECT,
-  })
-  const byId = new Map(projects.filter(isConfirmed).map(project => [project.id, project]))
-  return hits
-    .filter(hit => byId.has(hit.id))
-    .slice(0, limit)
-    .map(hit => ({ ...byId.get(hit.id)!, score: hit.score }))
+  const [base, ids] = await Promise.all([
+    loadShowcaseBase(),
+    searchIds(`${request.title} ${request.description}`, { limit: 40, minScore: 25 }),
+  ])
+  const byId = new Map(base.map(project => [project.id, project]))
+  return ids.filter(id => byId.has(id)).slice(0, limit).map(id => byId.get(id)!)
 }
 
 /** Направления, по которым на витрине есть решения, с числом решений. */
@@ -138,15 +185,9 @@ export function topicCounts(projects: { topics: { topic: string }[] }[]): { topi
  * возвращаются кандидаты поиска без объяснений (ai: false).
  */
 export async function matchShowcaseForTask(task: string) {
-  const { hits } = searchIndex(await loadSearchIndex(), task.slice(0, 600), { limit: 120, broad: true })
-  if (hits.length === 0) return { ai: true, picks: [], candidates: 0 }
-
-  const projects = await prisma.project.findMany({
-    where: { id: { in: hits.map(hit => hit.id) }, ...PUBLISHED_ONLY },
-    select: SHOWCASE_SELECT,
-  })
-  const byId = new Map(projects.filter(isConfirmed).map(project => [project.id, project]))
-  const candidates = hits.filter(hit => byId.has(hit.id)).slice(0, 40).map(hit => byId.get(hit.id)!)
+  const [base, ids] = await Promise.all([loadShowcaseBase(), searchIds(task, { limit: 120, broad: true })])
+  const byId = new Map(base.map(project => [project.id, project]))
+  const candidates = ids.filter(id => byId.has(id)).slice(0, 40).map(id => byId.get(id)!)
   if (candidates.length === 0) return { ai: true, picks: [], candidates: 0 }
 
   const matches = await matchTask(task, candidates)

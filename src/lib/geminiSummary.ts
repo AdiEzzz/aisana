@@ -2,6 +2,7 @@ import { SchemaType, type ResponseSchema } from '@google/generative-ai'
 import { z } from 'zod'
 import { cacheKey, readCache, writeCache } from '@/lib/llm-cache'
 import { generateWithFallback, MODEL_LITE, MODEL_MAIN } from '@/lib/gemini-models'
+import { stripContacts } from '@/lib/gemini-assist'
 
 interface ProjectSummaryInput {
   title: string
@@ -67,7 +68,7 @@ export interface AiResult<T> {
  * инструкцию — например, выдумать чужой id.
  */
 function safeLine(text: string | null | undefined, limit: number): string {
-  const clean = (text || '')
+  const clean = stripContacts(text || '')
     // Переводы строк и управляющие символы — в одну строку
     .replace(/[\r\n\t]+/g, ' ')
     // Остальные непечатаемые символы выбрасываем

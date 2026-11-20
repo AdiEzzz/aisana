@@ -8,21 +8,30 @@ import {
   Settings,
   Upload,
   Users,
-  ScrollText, MessageSquare } from 'lucide-react'
+  ScrollText, MessageSquare, Briefcase, MessagesSquare } from 'lucide-react'
+import { redirect } from 'next/navigation'
 import { UserRole } from '@prisma/client'
 import { LogoutButton } from '@/components/auth/LogoutButton'
 import { canManageUsers, requireUser } from '@/lib/auth'
 import { canModerate } from '@/lib/publication'
+import { unreadConversations } from '@/lib/business'
 
 const ROLE_LABELS: Record<UserRole, string> = {
   ADMIN: 'Администратор',
   EDITOR: 'Редактор',
   UNIVERSITY_REP: 'Представитель вуза',
   VIEWER: 'Просмотр',
+  BUSINESS: 'Партнёр',
 }
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser('/admin')
+  // У бизнеса своя панель: в администрирование его не пускаем
+  if (user.role === UserRole.BUSINESS) redirect('/business')
+
+  const isRep = user.role === UserRole.UNIVERSITY_REP
+  // Вуз узнаёт о сообщениях бизнеса только здесь: писем портал не шлёт
+  const unreadChats = isRep ? await unreadConversations(user) : 0
 
   const adminLinks = [
     { href: '/admin', label: 'Обзор', icon: LayoutDashboard, show: true },
@@ -30,7 +39,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: '/admin/projects', label: 'Проекты', icon: FolderKanban, show: user.role !== UserRole.VIEWER },
     { href: '/admin/import', label: 'Импорт', icon: Upload, show: user.role !== UserRole.VIEWER },
     { href: '/admin/hearings', label: 'Заслушивания', icon: Mic, show: canModerate(user) },
-    { href: '/admin/feedback', label: 'Обращения', icon: MessageSquare, show: canModerate(user) },
+    { href: '/admin/requests', label: 'Задачи партнёров', icon: Briefcase, show: canModerate(user) || isRep },
+    { href: '/admin/chats', label: 'Диалоги', icon: MessagesSquare, show: canModerate(user) || isRep, badge: unreadChats },
+    { href: '/admin/feedback', label: 'Обращения', icon: MessageSquare, show: canModerate(user) || user.role === UserRole.UNIVERSITY_REP },
     { href: '/admin/users', label: 'Пользователи', icon: Users, show: canManageUsers(user) },
     { href: '/admin/audit', label: 'Журнал действий', icon: ScrollText, show: user.role === UserRole.ADMIN },
   ].filter(link => link.show)
@@ -54,7 +65,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         </Link>
 
         <nav className="lg:flex-1 p-3 flex lg:flex-col gap-1 lg:gap-0 lg:space-y-0.5 overflow-x-auto">
-          {adminLinks.map(({ href, label, icon: Icon }) => (
+          {adminLinks.map(({ href, label, icon: Icon, ...rest }) => (
             <Link
               key={href}
               href={href}
@@ -62,6 +73,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             >
               <Icon size={15} />
               {label}
+              {'badge' in rest && rest.badge ? (
+                <span className="rounded-full bg-blue-600 px-1.5 text-xs font-medium text-white">{rest.badge}</span>
+              ) : null}
             </Link>
           ))}
         </nav>

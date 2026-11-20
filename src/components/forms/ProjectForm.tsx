@@ -9,6 +9,7 @@ import { AgentPassportViewer } from '@/components/project/AgentPassportViewer'
 import { ProjectFilesManager } from '@/components/project/ProjectFilesManager'
 import { INDUSTRIES } from '@/lib/industries'
 import { MIN_DESCRIPTION_LENGTH } from '@/lib/project-completeness'
+import { AiAssistPanel } from '@/components/forms/AiAssistPanel'
 
 interface University { id: string; name: string; shortName?: string | null }
 interface Technology { id: string; name: string; slug: string }
@@ -84,6 +85,42 @@ export function ProjectForm({ universities, technologies, project, defaultUniver
   // Место внедрения показываем обязательным, когда выбрана стадия «внедрено» или «масштабировано»
   const [status, setStatus] = useState(project?.status || 'IDEA')
   const deployed = status === 'IMPLEMENTED' || status === 'SCALED'
+
+  const formRef = useRef<HTMLFormElement>(null)
+
+  type FormField = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+  const field = (name: string) => formRef.current?.elements.namedItem(name) as FormField | null
+
+  // ИИ-помощник читает то, что введено сейчас, а не сохранённую карточку;
+  // файлы и паспорт берутся из сохранённой — они загружаются на других вкладках
+  function assistValues() {
+    const value = (name: string) => field(name)?.value ?? ''
+    return {
+      title: value('title'),
+      description: value('description'),
+      impact: value('impact'),
+      results: value('results'),
+      status: value('status'),
+      implementedAt: value('implementedAt'),
+      leadName: value('leadName'),
+      tags: value('tags').split(',').map(t => t.trim()).filter(Boolean),
+      agentPassportPdf: project?.agentPassportPdf,
+      files: project?.files,
+    }
+  }
+
+  function applyText(name: 'description' | 'impact' | 'results', text: string) {
+    const input = field(name)
+    if (input) input.value = text
+  }
+
+  function applyTags(tags: string[]) {
+    const input = field('tags')
+    if (!input) return
+    const current = input.value.split(',').map(t => t.trim()).filter(Boolean)
+    const known = new Set(current.map(t => t.toLowerCase()))
+    input.value = [...current, ...tags.filter(t => !known.has(t.toLowerCase()))].join(', ')
+  }
 
   function toggleTech(id: string) {
     setSelectedTechs(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id])
@@ -179,11 +216,13 @@ export function ProjectForm({ universities, technologies, project, defaultUniver
       </div>
 
       {/* Main info + category + tech + results + materials + tags — all in one submit */}
-      <form onSubmit={handleSubmit} className={tab === 'main' ? 'space-y-6' : 'hidden'}>
+      <form ref={formRef} onSubmit={handleSubmit} className={tab === 'main' ? 'space-y-6' : 'hidden'}>
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
         )}
         <SaveToast show={saved} />
+
+        <AiAssistPanel getValues={assistValues} applyText={applyText} applyTags={applyTags} />
 
         <section>
           <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-4 pb-2 border-b border-slate-100">Основная информация</h2>

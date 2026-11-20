@@ -352,6 +352,11 @@ export interface SearchOptions {
   limit?: number
   /** Порог оценки: ниже него результаты не показываются */
   minScore?: number
+  /**
+   * Широкий отбор: частичные совпадения даже когда есть точные. Нужен там,
+   * где выдачу дальше отбирает ИИ и ему важнее не пропустить кандидата.
+   */
+  broad?: boolean
 }
 
 /** Ищет по подготовленному индексу и возвращает результаты по убыванию оценки. */
@@ -369,7 +374,7 @@ export function searchIndex(
     .map(item => scoreProject(item, query, { broadTopics, strict }))
     .filter((hit): hit is SearchHit => hit !== null && hit.score >= minScore)
 
-  let found = run(true)
+  let found = options.broad ? run(false) : run(true)
   // Строгий отбор ничего не дал — показываем частичные совпадения
   if (found.length === 0) found = run(false)
 

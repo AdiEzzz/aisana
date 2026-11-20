@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 // force-dynamic + кэш в data-cache (см. комментарий в src/app/page.tsx)
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,8 @@ const DECISION_COLORS: Record<HearingDecision, string> = {
 export default async function HearingsPage() {
   // Настоящая проверка сессии: middleware смотрит только наличие cookie
   const user = await requireUser('/')
+  // Заслушивания — внутренняя работа комиссии: бизнесу раздел закрыт
+  if (user.role === 'BUSINESS') redirect('/business')
   // Слушания черновиков посторонним не показываем. Ключ кэша включает
   // область видимости: набор данных зависит от роли, общий кэш отдавал бы
   // одному пользователю чужой список.

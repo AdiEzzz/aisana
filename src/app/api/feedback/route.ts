@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { requireApiRole } from '@/lib/auth'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { audit } from '@/lib/audit'
+import { canModerate } from '@/lib/publication'
 import { feedbackSchema, feedbackStatusSchema, parseBody } from '@/lib/schemas'
 
 /** Приём обращения с публичной страницы «Контакты». */
@@ -60,10 +61,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** Смена статуса обращения — только для администраторов и редакторов. */
+/**
+ * Смена статуса обращения. Модераторы меняют любое; представитель вуза —
+ * только сообщения командам проектов своего вуза.
+ */
 export async function PATCH(request: NextRequest) {
   try {
-    const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR])
+    const { user, response } = await requireApiRole(request, [UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP])
     if (response) return response
 
     const body = await request.json().catch(() => ({}))
@@ -72,6 +76,18 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
     const { id, status } = parsed.data
+
+    if (!canModerate(user)) {
+      const own = await prisma.feedback.findFirst({
+        where: {
+          id,
+          topic: FeedbackTopic.PROJECT_CONTACT,
+          project: { universityId: user.universityId || '__none__' },
+        },
+        select: { id: true },
+      })
+      if (!own) return NextResponse.json({ error: 'Не найдено' }, { status: 404 })
+    }
 
     const feedback = await prisma.feedback.update({
       where: { id },

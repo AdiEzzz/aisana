@@ -1,9 +1,11 @@
 export const dynamic = 'force-dynamic'
 
 import { FeedbackStatus, FeedbackTopic, UserRole } from '@prisma/client'
-import { Mail, Building2 } from 'lucide-react'
+import Link from 'next/link'
+import { Mail, Building2, FolderKanban } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { requireRole } from '@/lib/auth'
+import { canModerate } from '@/lib/publication'
 import { formatDateLong } from '@/lib/utils'
 import { FeedbackStatusControl } from '@/components/admin/FeedbackStatusControl'
 import { Pagination } from '@/components/admin/Pagination'
@@ -15,6 +17,7 @@ const TOPIC_LABELS: Record<FeedbackTopic, string> = {
   ADD_PROJECT: 'Предложение проекта',
   BUG: 'Ошибка на портале',
   QUESTION: 'Вопрос',
+  PROJECT_CONTACT: 'Сообщение команде проекта',
 }
 
 const TOPIC_COLORS: Record<FeedbackTopic, string> = {
@@ -22,6 +25,7 @@ const TOPIC_COLORS: Record<FeedbackTopic, string> = {
   ADD_PROJECT: 'bg-violet-100 text-violet-700',
   BUG: 'bg-red-100 text-red-700',
   QUESTION: 'bg-slate-100 text-slate-600',
+  PROJECT_CONTACT: 'bg-emerald-100 text-emerald-700',
 }
 
 export default async function AdminFeedbackPage({
@@ -29,23 +33,30 @@ export default async function AdminFeedbackPage({
 }: {
   searchParams: Promise<{ status?: string; page?: string }>
 }) {
-  await requireRole([UserRole.ADMIN, UserRole.EDITOR], '/admin/feedback')
+  const user = await requireRole([UserRole.ADMIN, UserRole.EDITOR, UserRole.UNIVERSITY_REP], '/admin/feedback')
   const params = await searchParams
   const page = Math.max(1, parseInt(params.page || '1', 10) || 1)
 
+  // Представитель вуза видит только сообщения командам проектов своего вуза;
+  // обращения со страницы «Контакты» остаются модераторам
+  const scope = canModerate(user)
+    ? {}
+    : { topic: FeedbackTopic.PROJECT_CONTACT, project: { universityId: user.universityId || '__none__' } }
+
   const where = params.status && params.status in FeedbackStatus
-    ? { status: params.status as FeedbackStatus }
-    : {}
+    ? { ...scope, status: params.status as FeedbackStatus }
+    : scope
 
   const [items, total, newCount] = await Promise.all([
     prisma.feedback.findMany({
       where,
+      include: { project: { select: { id: true, title: true, publication: true } } },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     prisma.feedback.count({ where }),
-    prisma.feedback.count({ where: { status: FeedbackStatus.NEW } }),
+    prisma.feedback.count({ where: { ...scope, status: FeedbackStatus.NEW } }),
   ])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -97,6 +108,19 @@ export default async function AdminFeedbackPage({
                   <FeedbackStatusControl id={item.id} status={item.status} />
                 </div>
               </div>
+
+              {item.project && (
+                <p className="mb-2 inline-flex items-center gap-1.5 text-sm text-slate-500">
+                  <FolderKanban size={13} className="text-slate-400" />
+                  Проект:{' '}
+                  <Link
+                    href={item.project.publication === 'PUBLISHED' ? `/projects/${item.project.id}` : `/admin/projects/${item.project.id}/edit`}
+                    className="font-medium text-blue-600 hover:underline"
+                  >
+                    {item.project.title}
+                  </Link>
+                </p>
+              )}
 
               <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{item.message}</p>
 

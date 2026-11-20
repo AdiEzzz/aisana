@@ -20,7 +20,7 @@ import { GoogleGenerativeAI, type GenerativeModel } from '@google/generative-ai'
  */
 
 /** Тип задачи: от него зависит, какая квотная «корзина» используется первой. */
-export type GeminiTaskType = 'summary' | 'reasons'
+export type GeminiTaskType = 'summary' | 'reasons' | 'assist' | 'analogs' | 'match'
 
 /** Модель для сложных задач: пояснения по проектам, структурированный JSON. */
 export const MODEL_MAIN = process.env.GEMINI_MODEL || 'gemini-3.5-flash'

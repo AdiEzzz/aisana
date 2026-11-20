@@ -53,6 +53,11 @@ import { ProjectStatsTab } from '@/components/project/ProjectStatsTab'
 import { ProjectTopics } from '@/components/project/ProjectTopics'
 import { TOPICS } from '@/lib/search/taxonomy'
 import { ShareButton } from '@/components/project/ShareButton'
+import { SimilarProjects } from '@/components/project/SimilarProjects'
+import { MarketAnalogs } from '@/components/project/MarketAnalogs'
+import { ContactTeam } from '@/components/project/ContactTeam'
+import { StartChat } from '@/components/business/StartChat'
+import { UserRole } from '@prisma/client'
 
 const HEARING_COLORS: Record<HearingDecision, string> = {
   PENDING:     'bg-slate-100 text-slate-600',
@@ -77,7 +82,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   })
 
   // Настоящая проверка сессии: middleware смотрит только наличие cookie
-  await requireUser('/')
+  const user = await requireUser('/')
 
   // Неопубликованные проекты доступны только в админ-панели:
   // просмотр и редактирование — на /admin/projects/[id]/edit
@@ -118,6 +123,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
+      {/* Заслушивания — внутренняя работа комиссии, бизнесу их не показываем */}
+      {user.role !== UserRole.BUSINESS && (
       <div className="bg-white border border-slate-200 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-slate-700 flex items-center gap-2">
@@ -159,8 +166,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <p className="text-slate-400 text-sm">Заслушивания ещё не проводились</p>
         )}
       </div>
+      )}
 
       <ProjectTopics topics={project.topics} labels={topicLabels} />
+
+      <SimilarProjects projectId={project.id} />
+
+      <MarketAnalogs projectId={project.id} />
 
       {project.tags.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -245,10 +257,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <ShareButton title={project.title} />
-                <Link href={`/admin/projects/${project.id}/edit`}
-                  className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-blue-600 transition-colors border border-slate-200 px-3 py-1.5 rounded-lg hover:border-blue-300">
-                  <Pencil size={13} /> Редактировать
-                </Link>
+                {user.role !== UserRole.BUSINESS && (
+                  <Link href={`/admin/projects/${project.id}/edit`}
+                    className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-blue-600 transition-colors border border-slate-200 px-3 py-1.5 rounded-lg hover:border-blue-300">
+                    <Pencil size={13} /> Редактировать
+                  </Link>
+                )}
               </div>
             </div>
 
@@ -290,7 +304,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
                   <div>
                     <p className="text-xs text-slate-400">Руководитель</p>
                     <p className="font-medium text-slate-700">{project.leadName}</p>
-                    {project.leadEmail && <p className="text-xs text-slate-400">{project.leadEmail}</p>}
+                    {/* Партнёр пишет команде через диалог: почту руководителя не раскрываем */}
+                    {project.leadEmail && user.role !== UserRole.BUSINESS && <p className="text-xs text-slate-400">{project.leadEmail}</p>}
                   </div>
                 </div>
               )}
@@ -332,6 +347,23 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
               )}
             </div>
           </div>
+
+          {user.role === UserRole.BUSINESS ? (
+            <StartChat
+              projectId={project.id}
+              chatBasePath="/business/chats"
+              title="Связаться с командой"
+              hint="Напишите команде проекта: вопрос, демонстрация, пилот у себя. Ответ придёт в раздел «Диалоги»."
+              placeholder="Что вас интересует: демонстрация, пилот у себя, совместная работа"
+              buttonLabel="Написать команде"
+            />
+          ) : (
+            <ContactTeam
+              projectId={project.id}
+              replyTo={user.email}
+              defaultOrganization={user.university?.name}
+            />
+          )}
 
           {project.agentPassportPdf && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">

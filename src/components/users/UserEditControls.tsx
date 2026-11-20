@@ -26,6 +26,7 @@ const ROLE_OPTIONS = [
   { value: 'EDITOR', label: 'Редактор' },
   { value: 'UNIVERSITY_REP', label: 'Представитель вуза' },
   { value: 'VIEWER', label: 'Просмотр' },
+  { value: 'BUSINESS', label: 'Партнёр' },
 ]
 
 export function UserEditControls({ user, universities, isSelf = false, isLastAdmin = false }: Props) {

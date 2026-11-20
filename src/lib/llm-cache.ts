@@ -15,7 +15,7 @@ import { prisma } from '@/lib/prisma'
 /** Сколько живёт запись кэша. */
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
-export type CacheKind = 'summary' | 'reasons'
+export type CacheKind = 'summary' | 'reasons' | 'assist' | 'analogs' | 'match'
 
 /**
  * Счётчики попаданий и промахов.

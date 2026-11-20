@@ -52,6 +52,47 @@ export const feedbackSchema = z.object({
   website: z.string().optional(),
 })
 
+/** Запрос к ИИ-помощнику карточки: текущие значения полей формы. */
+export const assistSchema = z.object({
+  title: z.string().trim().min(3).max(500),
+  description: z.string().trim().max(8000).nullish(),
+  impact: z.string().trim().max(4000).nullish(),
+  results: z.string().trim().max(4000).nullish(),
+  status: z.nativeEnum(ProjectStatus).nullish(),
+  implementedAt: z.string().trim().max(2000).nullish(),
+  tags: z.array(z.string().trim().max(60)).max(30).optional(),
+})
+
+/** Сообщение команде проекта со страницы проекта. */
+export const projectContactSchema = z.object({
+  message: z.string().trim().min(10).max(4000),
+  organization: shortText(200),
+})
+
+/** Запрос бизнеса: задача, под которую он ищет решение. */
+export const businessRequestSchema = z.object({
+  title: z.string().trim().min(5).max(200),
+  description: z.string().trim().min(30).max(6000),
+  industry: z.nativeEnum(ProjectIndustry).nullish(),
+  expectation: shortText(2000),
+})
+
+export const businessRequestStatusSchema = z.object({
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'CLOSED', 'HIDDEN']),
+  moderationNote: shortText(1000),
+})
+
+/** Начало диалога: по проекту с витрины или в ответ на запрос бизнеса. */
+export const conversationStartSchema = z.object({
+  projectId: z.string().trim().min(1).max(64).nullish(),
+  requestId: z.string().trim().min(1).max(64).nullish(),
+  message: z.string().trim().min(2).max(4000),
+})
+
+export const messageSchema = z.object({
+  body: z.string().trim().min(1).max(4000),
+})
+
 export const feedbackStatusSchema = z.object({
   id: z.string().trim().min(1).max(64),
   status: z.nativeEnum(FeedbackStatus),
@@ -142,8 +183,9 @@ export const userCreateSchema = z.object({
   email: z.string().trim().email().max(255),
   name: shortText(200),
   password: z.string().min(6).max(200),
-  role: z.enum(['ADMIN', 'EDITOR', 'UNIVERSITY_REP', 'VIEWER']),
+  role: z.enum(['ADMIN', 'EDITOR', 'UNIVERSITY_REP', 'VIEWER', 'BUSINESS']),
   universityId: z.union([z.string().trim().max(64), z.null()]).optional(),
+  organization: shortText(200),
 })
 
 export const userUpdateSchema = z.object({
@@ -151,7 +193,8 @@ export const userUpdateSchema = z.object({
   email: z.union([z.string().trim().email().max(255), z.literal('')]).optional(),
   name: z.union([z.string().trim().max(200), z.null()]).optional(),
   password: z.union([z.string().min(6).max(200), z.literal('')]).optional(),
-  role: z.enum(['ADMIN', 'EDITOR', 'UNIVERSITY_REP', 'VIEWER']).optional(),
+  role: z.enum(['ADMIN', 'EDITOR', 'UNIVERSITY_REP', 'VIEWER', 'BUSINESS']).optional(),
+  organization: z.union([z.string().trim().max(200), z.null()]).optional(),
   universityId: z.union([z.string().trim().max(64), z.null()]).optional(),
 })
 

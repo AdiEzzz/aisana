@@ -21,6 +21,10 @@ export async function POST(request: NextRequest) {
     const password = data.password
     const role = data.role as UserRole
 
+    if (role === UserRole.BUSINESS && !data.organization) {
+      return NextResponse.json({ error: 'Для партнёра укажите организацию' }, { status: 400 })
+    }
+
     if (role === UserRole.UNIVERSITY_REP && !data.universityId) {
       return NextResponse.json({ error: 'Для представителя вуза нужно выбрать вуз' }, { status: 400 })
     }
@@ -33,6 +37,7 @@ export async function POST(request: NextRequest) {
         password: hashedPassword,
         role,
         universityId: role === UserRole.UNIVERSITY_REP ? data.universityId : null,
+        organization: role === UserRole.BUSINESS ? data.organization : null,
       },
       select: {
         id: true,

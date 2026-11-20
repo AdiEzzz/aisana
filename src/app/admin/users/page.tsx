@@ -17,6 +17,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   EDITOR: 'Редактор',
   UNIVERSITY_REP: 'Представитель вуза',
   VIEWER: 'Просмотр',
+  BUSINESS: 'Партнёр',
 }
 
 const ROLE_COLORS: Record<UserRole, string> = {
@@ -24,6 +25,7 @@ const ROLE_COLORS: Record<UserRole, string> = {
   EDITOR: 'bg-blue-100 text-blue-700',
   UNIVERSITY_REP: 'bg-violet-100 text-violet-700',
   VIEWER: 'bg-slate-100 text-slate-600',
+  BUSINESS: 'bg-emerald-100 text-emerald-700',
 }
 
 const SORTS: Record<string, Prisma.UserOrderByWithRelationInput> = {

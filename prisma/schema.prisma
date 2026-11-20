@@ -16,11 +16,16 @@ model User {
   universityId String?
   university   University? @relation(fields: [universityId], references: [id], onDelete: SetNull)
   image        String?
+  // Организация представителя бизнеса (у остальных ролей пусто)
+  organization String?
   // Когда пользователь последний раз вошёл; null — ни разу не входил
   lastLoginAt  DateTime?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   sessions     Session[]
+  businessRequests BusinessRequest[]
+  conversations    Conversation[]
+  messages         Message[]
   @@index([universityId])
   @@map("users")
 }
@@ -40,6 +45,7 @@ enum UserRole {
   EDITOR
   UNIVERSITY_REP
   VIEWER
+  BUSINESS // представитель бизнеса: витрина решений, свои запросы, чат с командами
 }
 
 model Region {
@@ -71,6 +77,7 @@ model University {
   type        UniversityType @default(STATE)
   users       User[]
   projects    Project[]
+  conversations Conversation[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   @@index([regionId])
@@ -124,6 +131,9 @@ model Project {
   searchHitCount   Int            @default(0)
 
   hearings         Hearing[]
+  // Обращения к команде проекта с его страницы («Связаться с командой»)
+  inquiries        Feedback[]
+  conversations    Conversation[]
   tags             String[]
 
   // Тематические направления, вычисленные классификатором (см. lib/search).
@@ -309,10 +319,16 @@ model Feedback {
   message      String       @db.Text
   status       FeedbackStatus @default(NEW)
   adminNote    String?      @db.Text
+  // Обращение к команде проекта: к какому проекту и кто из пользователей написал.
+  // У обращений со страницы «Контакты» оба поля пустые.
+  projectId    String?
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  userId       String?
   createdAt    DateTime     @default(now())
   handledAt    DateTime?
 
   @@index([status])
+  @@index([projectId])
   @@index([createdAt])
   @@map("feedback")
 }
@@ -322,10 +338,100 @@ enum FeedbackTopic {
   ADD_PROJECT    // предложить проект
   BUG            // ошибка на портале
   QUESTION       // общий вопрос
+  PROJECT_CONTACT // обращение к команде проекта
 }
 
 enum FeedbackStatus {
   NEW
   IN_PROGRESS
   DONE
+}
+
+// ── Витрина для бизнеса ─────────────────────────────────────
+
+// Запрос бизнеса: задача, под которую он ищет ИИ-решение у вузов.
+model BusinessRequest {
+  id          String                @id @default(cuid())
+  authorId    String
+  author      User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  title       String
+  description String                @db.Text
+  industry    ProjectIndustry?
+  // Что бизнес ждёт на выходе: пилот, внедрение, консультация
+  expectation String?               @db.Text
+  status      BusinessRequestStatus @default(OPEN)
+  // Комментарий модератора, когда запрос скрыт
+  moderationNote String?            @db.Text
+  conversations  Conversation[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([authorId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("business_requests")
+}
+
+enum BusinessRequestStatus {
+  OPEN        // вузы видят запрос и могут откликнуться
+  IN_PROGRESS // бизнес выбрал команду, идёт работа
+  CLOSED      // закрыт автором
+  HIDDEN      // скрыт модератором
+}
+
+// Диалог представителя бизнеса с командой вуза. Привязан к проекту с витрины
+// (бизнес написал команде) или к запросу бизнеса (вуз откликнулся), либо к обоим.
+model Conversation {
+  id             String           @id @default(cuid())
+  businessUserId String
+  businessUser   User             @relation(fields: [businessUserId], references: [id], onDelete: Cascade)
+  universityId   String
+  university     University       @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  projectId      String?
+  project        Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  requestId      String?
+  request        BusinessRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  messages       Message[]
+  // Когда каждая сторона последний раз открывала диалог — для счётчика непрочитанных
+  businessReadAt   DateTime?
+  universityReadAt DateTime?
+  lastMessageAt  DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+
+  @@index([businessUserId, lastMessageAt])
+  @@index([universityId, lastMessageAt])
+  @@index([projectId])
+  @@index([requestId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String?
+  sender         User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  // Сторона отправителя снимком: остаётся понятной после удаления пользователя
+  fromBusiness   Boolean
+  body           String       @db.Text
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// Что партнёры ищут на витрине и сколько находят. Нужен, чтобы видеть
+// задачи, под которые на портале нет решений.
+model PartnerSearch {
+  id           String   @id @default(cuid())
+  userId       String?
+  organization String?
+  query        String   @db.Text
+  topic        String?
+  withAi       Boolean  @default(false)
+  results      Int
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("partner_searches")
 }

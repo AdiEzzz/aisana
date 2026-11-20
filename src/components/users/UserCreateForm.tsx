@@ -19,6 +19,7 @@ const ROLES: { value: UserRole; label: string }[] = [
   { value: 'EDITOR', label: 'Редактор' },
   { value: 'UNIVERSITY_REP', label: 'Представитель вуза' },
   { value: 'VIEWER', label: 'Просмотр' },
+  { value: 'BUSINESS', label: 'Партнёр' },
 ]
 
 export function UserCreateForm({ universities }: Props) {
@@ -39,6 +40,7 @@ export function UserCreateForm({ universities }: Props) {
       password: (form.elements.namedItem('password') as HTMLInputElement).value,
       role,
       universityId: (form.elements.namedItem('universityId') as HTMLSelectElement).value || null,
+      organization: (form.elements.namedItem('organization') as HTMLInputElement | null)?.value || null,
     }
 
     try {
@@ -100,6 +102,12 @@ export function UserCreateForm({ universities }: Props) {
             ))}
           </select>
         </div>
+        {role === 'BUSINESS' && (
+          <div className="md:col-span-2">
+            <label className={labelClass}>Организация</label>
+            <input name="organization" required maxLength={200} className={inputClass} placeholder="Название компании" />
+          </div>
+        )}
         <div className="md:col-span-2">
           <label className={labelClass}>Вуз</label>
           <select name="universityId" required={role === 'UNIVERSITY_REP'} className={inputClass}>

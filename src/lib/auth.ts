@@ -5,8 +5,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { UserRole } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { canModerate } from '@/lib/publication'
+import { hashSessionToken } from '@/lib/session-token'
 
-export const SESSION_COOKIE = 'ai_map_kz_session'
+// Имя cookie и флаг Secure должны совпадать: браузер отбрасывает `__Host-`
+// без Secure и по http, поэтому в разработке имя обычное. Прод работает через TLS.
+const SECURE_COOKIE = process.env.NODE_ENV === 'production'
+export const SESSION_COOKIE = SECURE_COOKIE ? '__Host-ai_map_sess' : 'ai_map_sess'
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 export type AuthUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
@@ -22,7 +26,7 @@ async function findUserByToken(token?: string) {
   if (!token) return null
 
   const session = await prisma.session.findUnique({
-    where: { sessionToken: token },
+    where: { sessionToken: hashSessionToken(token) },
     include: {
       user: {
         include: {

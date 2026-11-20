@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Map, FolderKanban, Star, LayoutDashboard, Settings, Building2, Sparkles, Menu, X } from 'lucide-react'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
+import { ThemeSwitcher } from '@/components/ui/ThemeSwitcher'
 import { useLang } from '@/context/LangContext'
 
 export function Navbar() {
@@ -13,6 +14,23 @@ export function Navbar() {
   // Пока файла нет (или он не загрузился) — показывается запасной значок,
   // шапка не «ломается» пустой картинкой.
   const [logoFailed, setLogoFailed] = useState(false)
+
+  // Скролл колёсиком листает навигацию, а не страницу: иначе при наведении на
+  // шапку вертикальный скролл дёргает страницу вниз-вверх. React вешает wheel
+  // как passive, поэтому preventDefault не сработает — вешаем свой { passive: false }.
+  // Пока навигация помещается — страница листается как обычно.
+  const navRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = navRef.current
+    if (!el) return
+    const onWheel = (event: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return
+      event.preventDefault()
+      el.scrollLeft += Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   // Роль нужна, чтобы не показывать разделы, куда пользователя всё равно не пустят.
   // Это только удобство интерфейса — доступ проверяется на сервере.
@@ -58,14 +76,14 @@ export function Navbar() {
           )}
           <div className="hidden md:block">
             <p className="text-white font-semibold text-sm leading-tight">AiSana</p>
-            <p className="text-white/50 text-[10px] leading-tight">Карта ИИ-решений · QazInnovations</p>
+            <p className="text-white/50 text-[10px] leading-tight">{t('nav', 'tagline')}</p>
           </div>
         </Link>
 
         <div className="hidden lg:block h-6 w-px bg-white/10" />
 
-        {/* Navigation */}
-        <nav className="hidden lg:flex items-center gap-1 flex-1 overflow-x-auto">
+        {/* Navigation: на узких экранах листается колесом мыши, скроллбар скрыт */}
+        <nav ref={navRef} className="nav-scroll hidden lg:flex items-center gap-1 flex-1 overflow-x-auto">
           {navLinks.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
@@ -84,13 +102,14 @@ export function Navbar() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-amber-300/80 hover:text-amber-300 hover:bg-white/10 transition-all text-sm whitespace-nowrap border border-amber-400/20 ml-1"
             >
               <Sparkles size={14} className="shrink-0" />
-              <span>ИИ-поиск</span>
+              <span>{t('nav', 'aiSearch')}</span>
             </Link>
           )}
         </nav>
 
-        {/* Lang switcher */}
+        {/* Переключатели языка и темы */}
         <LangSwitcher />
+        <ThemeSwitcher />
 
         {/* Админ-панель для вошедших, иначе — приглашение войти */}
         <Link
@@ -106,7 +125,7 @@ export function Navbar() {
           type="button"
           onClick={() => setMenuOpen(open => !open)}
           className="lg:hidden flex items-center justify-center w-9 h-9 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors shrink-0"
-          aria-label={menuOpen ? 'Закрыть меню' : 'Открыть меню'}
+          aria-label={menuOpen ? t('nav', 'menuClose') : t('nav', 'menuOpen')}
           aria-expanded={menuOpen}
         >
           {menuOpen ? <X size={18} /> : <Menu size={18} />}
@@ -134,7 +153,7 @@ export function Navbar() {
               className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-amber-300/90 hover:text-amber-300 hover:bg-white/10 transition-all text-sm border border-amber-400/20"
             >
               <Sparkles size={15} className="shrink-0" />
-              ИИ-поиск
+              {t('nav', 'aiSearch')}
             </Link>
           )}
         </nav>
